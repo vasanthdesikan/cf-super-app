@@ -204,6 +204,107 @@
             margin-bottom: 20px;
             color: #333;
         }
+        
+        .resources-section {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #eee;
+        }
+        
+        .resources-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .resources-header h3 {
+            margin: 0;
+            color: #333;
+        }
+        
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.3s;
+        }
+        
+        .refresh-btn:hover {
+            background: #5568d3;
+        }
+        
+        .resources-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .resources-table th {
+            background: #f5f5f5;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #ddd;
+        }
+        
+        .resources-table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .resources-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .resources-table tr:hover {
+            background: #f9f9f9;
+        }
+        
+        .resources-loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .resources-error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        
+        .badge-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .badge-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .badge-info {
+            background: #17a2b8;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -278,6 +379,11 @@
                 tabContent.innerHTML = createServiceForm(serviceId, service.display_name);
                 tabContentsContainer.appendChild(tabContent);
                 
+                // Load resources when tab becomes active
+                if (firstTab) {
+                    setTimeout(() => loadResources(serviceId), 100);
+                }
+                
                 firstTab = false;
             }
         }
@@ -302,7 +408,14 @@
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
             });
-            document.getElementById(`tab-${serviceId}`).classList.add('active');
+            const activeTab = document.getElementById(`tab-${serviceId}`);
+            activeTab.classList.add('active');
+            
+            // Load resources for the active tab
+            const resourcesDiv = document.getElementById(`resources-${serviceId}`);
+            if (resourcesDiv && resourcesDiv.innerHTML.includes('Loading...')) {
+                loadResources(serviceId);
+            }
         }
         
         function createServiceForm(serviceId, displayName) {
@@ -333,10 +446,344 @@
                         <button type="submit" class="btn" id="btn-${serviceId}">Test ${displayName}</button>
                     </form>
                     <div id="result-${serviceId}" class="result"></div>
+                    
+                    <div class="resources-section">
+                        <div class="resources-header">
+                            <h3>${getResourceTitle(serviceId)}</h3>
+                            <button class="refresh-btn" onclick="refreshCurrentView('${serviceId}')">Refresh</button>
+                        </div>
+                        <div id="resources-${serviceId}">
+                            <div class="resources-loading">Loading...</div>
+                        </div>
+                    </div>
                 </div>
             `;
             
             return formHTML;
+        }
+        
+        function getResourceTitle(serviceId) {
+            const titles = {
+                'mysql': 'MySQL Tables',
+                'postgres': 'PostgreSQL Tables',
+                'rabbitmq': 'RabbitMQ Queues',
+                'valkey': 'Valkey Cache Keys'
+            };
+            return titles[serviceId] || 'Resources';
+        }
+        
+        async function loadResources(serviceId) {
+            const resourcesDiv = document.getElementById(`resources-${serviceId}`);
+            resourcesDiv.innerHTML = '<div class="resources-loading">Loading...</div>';
+            
+            try {
+                let url = `/api/list/${serviceId}`;
+                
+                // For MySQL/PostgreSQL, first get table list, then auto-load first table
+                if (serviceId === 'mysql' || serviceId === 'postgres') {
+                    const response = await fetch(url);
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        // If we have tables, automatically load the first table's data
+                        if (result.data.tables && result.data.tables.length > 0) {
+                            loadTableData(serviceId, result.data.tables[0].name, 0);
+                        } else {
+                            displayResources(serviceId, result.data);
+                        }
+                    } else {
+                        resourcesDiv.innerHTML = `
+                            <div class="resources-error">
+                                <strong>Error:</strong> ${result.error || 'Failed to load resources'}
+                            </div>
+                        `;
+                    }
+                } else {
+                    // For other services (valkey, rabbitmq), load normally
+                    if (serviceId === 'valkey') {
+                        url += '?pattern=*&limit=100';
+                    }
+                    
+                    const response = await fetch(url);
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        displayResources(serviceId, result.data);
+                    } else {
+                        resourcesDiv.innerHTML = `
+                            <div class="resources-error">
+                                <strong>Error:</strong> ${result.error || 'Failed to load resources'}
+                            </div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                resourcesDiv.innerHTML = `
+                    <div class="resources-error">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        function displayResources(serviceId, data) {
+            const resourcesDiv = document.getElementById(`resources-${serviceId}`);
+            
+            if (serviceId === 'mysql' || serviceId === 'postgres') {
+                displayTables(serviceId, data, resourcesDiv);
+            } else if (serviceId === 'rabbitmq') {
+                displayQueues(data, resourcesDiv);
+            } else if (serviceId === 'valkey') {
+                displayKeys(data, resourcesDiv);
+            }
+        }
+        
+        function displayTables(serviceId, data, container) {
+            // Check if this is table data or table list
+            if (data.columns && data.rows !== undefined) {
+                displayTableData(serviceId, data, container);
+                return;
+            }
+            
+            // If we have a table list, automatically load the first table's data
+            if (data.tables && data.tables.length > 0) {
+                const firstTable = data.tables[0].name;
+                loadTableData(serviceId, firstTable, 0);
+                return;
+            }
+            
+            // No tables found
+            container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No tables found in database ' + (data.database || 'N/A') + '</p>';
+        }
+        
+        function displayTableData(serviceId, data, container) {
+            // Store current table name for refresh functionality
+            container.setAttribute('data-current-table', data.table);
+            container.setAttribute('data-current-offset', data.offset || 0);
+            
+            if (!data.columns || !data.rows || data.rows.length === 0) {
+                container.innerHTML = `
+                    <p style="color: #666; text-align: center; padding: 20px;">
+                        Table <strong>${data.table}</strong> is empty or has no data.
+                    </p>
+                `;
+                return;
+            }
+            
+            let html = `
+                <p style="margin-bottom: 15px; color: #666;">
+                    Table: <strong>${data.table}</strong> | 
+                    Showing rows <strong>${data.offset + 1}</strong> - <strong>${data.offset + data.returned_rows}</strong> of <strong>${data.total_rows.toLocaleString()}</strong>
+                </p>
+                <div style="overflow-x: auto;">
+                    <table class="resources-table">
+                        <thead>
+                            <tr>
+            `;
+            
+            // Display column headers
+            data.columns.forEach(col => {
+                html += `<th>${col}</th>`;
+            });
+            
+            html += `
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            // Display rows
+            data.rows.forEach(row => {
+                html += `<tr>`;
+                data.columns.forEach(col => {
+                    let value = row[col];
+                    if (value === null || value === undefined) {
+                        value = '<span style="color: #999; font-style: italic;">NULL</span>';
+                    } else if (typeof value === 'object') {
+                        value = JSON.stringify(value);
+                    } else {
+                        value = String(value);
+                        // Truncate very long values
+                        if (value.length > 100) {
+                            value = value.substring(0, 100) + '...';
+                        }
+                        // Escape HTML
+                        value = value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    }
+                    html += `<td style="font-family: monospace; font-size: 0.9em;">${value}</td>`;
+                });
+                html += `</tr>`;
+            });
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            // Pagination controls
+            if (data.total_rows > data.limit) {
+                const currentPage = Math.floor(data.offset / data.limit) + 1;
+                const totalPages = Math.ceil(data.total_rows / data.limit);
+                
+                html += `
+                    <div style="margin-top: 20px; display: flex; align-items: center; gap: 10px;">
+                        <button class="refresh-btn" onclick="loadTableData('${serviceId}', '${data.table}', ${Math.max(0, data.offset - data.limit)})" ${data.offset === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>Previous</button>
+                        <span style="color: #666;">Page ${currentPage} of ${totalPages}</span>
+                        <button class="refresh-btn" onclick="loadTableData('${serviceId}', '${data.table}', ${data.offset + data.limit})" ${data.offset + data.returned_rows >= data.total_rows ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>Next</button>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function loadTableData(serviceId, tableName, offset = 0) {
+            if (!tableName) {
+                // If no table name provided, first get table list and then load first table
+                loadResources(serviceId);
+                return;
+            }
+            
+            const resourcesDiv = document.getElementById(`resources-${serviceId}`);
+            resourcesDiv.innerHTML = '<div class="resources-loading">Loading table data...</div>';
+            
+            fetch(`/api/list/${serviceId}?table=${encodeURIComponent(tableName)}&limit=50&offset=${offset}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        displayResources(serviceId, result.data);
+                    } else {
+                        resourcesDiv.innerHTML = `
+                            <div class="resources-error">
+                                <strong>Error:</strong> ${result.error || 'Failed to load table data'}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    resourcesDiv.innerHTML = `
+                        <div class="resources-error">
+                            <strong>Error:</strong> ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        function refreshCurrentView(serviceId) {
+            const resourcesDiv = document.getElementById(`resources-${serviceId}`);
+            
+            // Check if we're viewing table data (has data-current-table attribute)
+            const currentTable = resourcesDiv.getAttribute('data-current-table');
+            const currentOffset = parseInt(resourcesDiv.getAttribute('data-current-offset') || '0');
+            
+            if (currentTable) {
+                // Refresh current table data
+                loadTableData(serviceId, currentTable, currentOffset);
+            } else {
+                // Refresh resources (will auto-load first table)
+                loadResources(serviceId);
+            }
+        }
+        
+        function displayQueues(data, container) {
+            if (data.note) {
+                container.innerHTML = `<p style="color: #666; padding: 15px; background: #f0f0f0; border-radius: 6px;">${data.note}</p>`;
+                return;
+            }
+            
+            if (!data.queues || data.queues.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No queues found in vhost ' + data.vhost + '</p>';
+                return;
+            }
+            
+            let html = `
+                <p style="margin-bottom: 15px; color: #666;">
+                    Virtual Host: <strong>${data.vhost}</strong> | 
+                    Queues: <strong>${data.count}</strong>
+                </p>
+                <table class="resources-table">
+                    <thead>
+                        <tr>
+                            <th>Queue Name</th>
+                            <th>Messages</th>
+                            <th>Consumers</th>
+                            <th>Properties</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            data.queues.forEach(queue => {
+                const badges = [];
+                if (queue.durable) badges.push('<span class="badge badge-primary">Durable</span>');
+                if (queue.auto_delete) badges.push('<span class="badge badge-info">Auto-delete</span>');
+                
+                html += `
+                    <tr>
+                        <td><strong>${queue.name}</strong></td>
+                        <td>${queue.messages.toLocaleString()}</td>
+                        <td>${queue.consumers}</td>
+                        <td>${badges.join(' ')}</td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = html;
+        }
+        
+        function displayKeys(data, container) {
+            if (!data.keys || data.keys.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No keys found matching pattern: ' + data.pattern + '</p>';
+                return;
+            }
+            
+            let html = `
+                <p style="margin-bottom: 15px; color: #666;">
+                    Pattern: <strong>${data.pattern}</strong> | 
+                    Showing: <strong>${data.count}</strong>
+                    ${data.total_found !== null ? '| Total: <strong>' + data.total_found + '</strong>' : ''}
+                </p>
+                <table class="resources-table">
+                    <thead>
+                        <tr>
+                            <th>Key</th>
+                            <th>Type</th>
+                            <th>TTL</th>
+                            <th>Value Preview</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            data.keys.forEach(keyInfo => {
+                const ttlDisplay = keyInfo.ttl !== null && keyInfo.ttl !== undefined 
+                    ? keyInfo.ttl + 's' 
+                    : '<span style="color: #999;">No expiration</span>';
+                
+                html += `
+                    <tr>
+                        <td><strong>${keyInfo.key}</strong></td>
+                        <td><span class="badge badge-info">${keyInfo.type}</span></td>
+                        <td>${ttlDisplay}</td>
+                        <td style="font-family: monospace; font-size: 0.9em; color: #666;">
+                            ${keyInfo.value_preview || 'N/A'}
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = html;
         }
         
         async function testService(serviceId, event) {

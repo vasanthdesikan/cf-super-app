@@ -11,6 +11,6 @@ applications:
     # Add your service instances here, for example:
     # - my-rabbitmq-service
     # - my-valkey-service
-    # - my-mysql-service
-    # - my-postgres-service
+     - my-mysql-service
+     - my-postgres-service
 

@@ -9,3 +9,8 @@ venv/
 *.swo
 *~
 
+# Setup scripts (not needed for deployment)
+setup.sh
+setup.bat
+setup.py
+

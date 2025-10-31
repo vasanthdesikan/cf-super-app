@@ -128,4 +128,240 @@ class PostgresHandler:
         finally:
             if cursor:
                 cursor.close()
+    
+    def list_tables(self):
+        """List all tables in the database"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all tables
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """)
+            tables = cursor.fetchall()
+            
+            # Get table information
+            table_list = []
+            for table in tables:
+                table_name = table[0]
+                # Get row count
+                cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
+                    sql.Identifier(table_name)
+                ))
+                row_count = cursor.fetchone()[0]
+                
+                # Get table size - use format string to properly construct regclass
+                # Escape the table name to prevent SQL injection
+                escaped_table = table_name.replace("'", "''")
+                cursor.execute(sql.SQL("SELECT pg_size_pretty(pg_total_relation_size({}::regclass))").format(
+                    sql.Literal(f"public.{escaped_table}")
+                ))
+                size_result = cursor.fetchone()
+                size = size_result[0] if size_result else '0 bytes'
+                
+                table_list.append({
+                    'name': table_name,
+                    'row_count': row_count if row_count else 0,
+                    'size': size
+                })
+            
+            return {
+                'database': self.database,
+                'tables': table_list,
+                'count': len(table_list)
+            }
+        except Exception as e:
+            raise Exception(f"Failed to list PostgreSQL tables: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def get_table_data(self, table_name, limit=100, offset=0):
+        """Get data from a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get column names
+            cursor.execute(sql.SQL("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_schema = 'public' 
+                AND table_name = {}
+                ORDER BY ordinal_position
+            """).format(sql.Literal(table_name)))
+            columns = [row[0] for row in cursor.fetchall()]
+            
+            # Get total row count
+            cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
+                sql.Identifier(table_name)
+            ))
+            total_rows = cursor.fetchone()[0]
+            
+            # Get data with limit and offset
+            cursor.execute(sql.SQL("SELECT * FROM {} LIMIT {} OFFSET {}").format(
+                sql.Identifier(table_name),
+                sql.Literal(limit),
+                sql.Literal(offset)
+            ))
+            
+            # Fetch all rows and convert to list of dicts
+            rows = []
+            column_names = [desc[0] for desc in cursor.description]
+            for row in cursor.fetchall():
+                row_dict = {}
+                for i, value in enumerate(row):
+                    # Convert datetime and other objects to strings
+                    if hasattr(value, 'isoformat'):
+                        row_dict[column_names[i]] = value.isoformat()
+                    else:
+                        row_dict[column_names[i]] = value
+                rows.append(row_dict)
+            
+            return {
+                'table': table_name,
+                'columns': columns,
+                'rows': rows,
+                'total_rows': total_rows,
+                'limit': limit,
+                'offset': offset,
+                'returned_rows': len(rows)
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get PostgreSQL table data: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def create_row(self, table_name, data):
+        """Insert a new row into a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build INSERT statement using sql.Identifier for safety
+            columns = list(data.keys())
+            placeholders = ', '.join(['%s'] * len(columns))
+            values = list(data.values())
+            
+            insert_sql = sql.SQL("INSERT INTO {} ({}) VALUES ({}) RETURNING *").format(
+                sql.Identifier(table_name),
+                sql.SQL(', ').join([sql.Identifier(col) for col in columns]),
+                sql.SQL(placeholders)
+            )
+            
+            # Execute with values
+            cursor.execute(str(insert_sql), values)
+            result = cursor.fetchone()
+            
+            # Get column names
+            column_names = [desc[0] for desc in cursor.description]
+            inserted_row = {}
+            for i, value in enumerate(result):
+                if hasattr(value, 'isoformat'):
+                    inserted_row[column_names[i]] = value.isoformat()
+                else:
+                    inserted_row[column_names[i]] = value
+            
+            conn.commit()
+            
+            return {
+                'action': 'create',
+                'table': table_name,
+                'inserted_row': inserted_row,
+                'data': data,
+                'status': 'success'
+            }
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to create row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def update_row(self, table_name, where_clause, where_params, update_data):
+        """Update rows in a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build UPDATE statement
+            set_parts = []
+            values = []
+            for col, val in update_data.items():
+                set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(col)))
+                values.append(val)
+            
+            values.extend(where_params)
+            
+            update_sql = sql.SQL("UPDATE {} SET {} WHERE {} RETURNING *").format(
+                sql.Identifier(table_name),
+                sql.SQL(', ').join(set_parts),
+                sql.SQL(where_clause)
+            )
+            
+            cursor.execute(str(update_sql), values)
+            affected_rows = cursor.rowcount
+            updated_rows = cursor.fetchall()
+            
+            conn.commit()
+            
+            return {
+                'action': 'update',
+                'table': table_name,
+                'affected_rows': affected_rows,
+                'update_data': update_data,
+                'updated_rows': len(updated_rows),
+                'status': 'success'
+            }
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to update row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def delete_row(self, table_name, where_clause, where_params):
+        """Delete rows from a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            delete_sql = sql.SQL("DELETE FROM {} WHERE {} RETURNING *").format(
+                sql.Identifier(table_name),
+                sql.SQL(where_clause)
+            )
+            
+            cursor.execute(str(delete_sql), where_params)
+            affected_rows = cursor.rowcount
+            deleted_rows = cursor.fetchall()
+            
+            conn.commit()
+            
+            return {
+                'action': 'delete',
+                'table': table_name,
+                'affected_rows': affected_rows,
+                'deleted_rows': len(deleted_rows),
+                'status': 'success'
+            }
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to delete row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
 

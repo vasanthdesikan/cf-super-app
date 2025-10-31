@@ -42,26 +42,196 @@ services:
     display_name: "PostgreSQL"
 ```
 
+## CLI Interface
+
+The application includes a command-line interface for all operations available in the UI.
+
+### Usage
+
+```bash
+python cli.py <service> <action> [options]
+```
+
+### Examples
+
+**MySQL Operations:**
+```bash
+# List all tables
+python cli.py mysql list-tables
+
+# Show table data
+python cli.py mysql show-table --table test_table
+python cli.py mysql show-table --table test_table --limit 20 --offset 0
+
+# Test transaction
+python cli.py mysql test --table-name test_table --value "My test data"
+```
+
+**PostgreSQL Operations:**
+```bash
+# List all tables
+python cli.py postgres list-tables
+
+# Show table data
+python cli.py postgres show-table --table test_table
+
+# Test transaction
+python cli.py postgres test --table-name test_table --value "My test data"
+```
+
+**RabbitMQ Operations:**
+```bash
+# List all queues
+python cli.py rabbitmq list-queues
+
+# Test transaction
+python cli.py rabbitmq test --queue-name my_queue --message "Hello World"
+
+# CRUD Operations
+# Publish message (CREATE)
+python cli.py rabbitmq publish --queue my_queue --message "Hello World"
+python cli.py rabbitmq publish --queue my_queue --message "Persistent" --durable
+
+# Consume message (READ)
+python cli.py rabbitmq consume --queue my_queue
+python cli.py rabbitmq consume --queue my_queue --no-ack
+
+# Purge queue (DELETE messages)
+python cli.py rabbitmq purge --queue my_queue
+
+# Delete queue completely
+python cli.py rabbitmq delete-queue --queue my_queue
+python cli.py rabbitmq delete-queue --queue my_queue --if-empty
+```
+
+**Valkey Operations:**
+```bash
+# List cache keys
+python cli.py valkey list-keys
+python cli.py valkey list-keys --pattern "test_*" --limit 50
+
+# Test transaction
+python cli.py valkey test --key my_key --value "My value"
+
+# CRUD Operations
+# Set key (CREATE/UPDATE)
+python cli.py valkey set --key my_key --value "My value"
+python cli.py valkey set --key my_key --value "My value" --ttl 3600
+
+# Get key (READ)
+python cli.py valkey get --key my_key
+
+# Check if key exists
+python cli.py valkey exists --key my_key
+
+# Delete key (DELETE)
+python cli.py valkey delete --key my_key
+```
+
+### CRUD Operations
+
+**Create (Insert) Rows:**
+```bash
+# MySQL
+python cli.py mysql create --table users --data '{"name":"John","email":"john@example.com","age":30}'
+
+# PostgreSQL
+python cli.py postgres create --table users --data '{"name":"John","email":"john@example.com","age":30}'
+```
+
+**Update Rows:**
+```bash
+# MySQL - Update where id = 1
+python cli.py mysql update --table users --where "id = %s" --where-values '[1]' --data '{"name":"Jane","age":25}'
+
+# PostgreSQL - Update where id = 1
+python cli.py postgres update --table users --where "id = %s" --where-values '[1]' --data '{"name":"Jane","age":25}'
+```
+
+**Delete Rows:**
+```bash
+# MySQL - Delete where id = 1
+python cli.py mysql delete --table users --where "id = %s" --where-values '[1]'
+
+# PostgreSQL - Delete where id = 1
+python cli.py postgres delete --table users --where "id = %s" --where-values '[1]'
+
+# Delete multiple rows (where age > 50)
+python cli.py mysql delete --table users --where "age > %s" --where-values '[50]'
+```
+
+### Help
+
+Get help for any service:
+```bash
+python cli.py <service> --help
+python cli.py mysql --help
+```
+
 ## Local Development
 
-1. Install dependencies:
+### Quick Setup
+
+Run the setup script to create a virtual environment and install dependencies:
+
+**On macOS/Linux:**
 ```bash
+./setup.sh
+```
+
+**On Windows:**
+```cmd
+setup.bat
+```
+
+**Cross-platform (Python script):**
+```bash
+python3 setup.py
+```
+
+The setup script will:
+- Check Python version (requires 3.8+)
+- Create a virtual environment in `venv/`
+- Install all dependencies from `requirements.txt`
+- Provide instructions for activation
+
+### Manual Setup
+
+Alternatively, set up manually:
+
+1. Create virtual environment:
+```bash
+python3 -m venv venv
+```
+
+2. Activate virtual environment:
+```bash
+# macOS/Linux
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate.bat
+```
+
+3. Install dependencies:
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-2. Set environment variables (if not using Cloud Foundry services):
+4. Set environment variables (if not using Cloud Foundry services):
 ```bash
 export RABBITMQ_HOST=localhost
 export RABBITMQ_PORT=5672
 # ... etc
 ```
 
-3. Run the application:
+5. Run the application:
 ```bash
 python app.py
 ```
 
-4. Open browser: http://localhost:8080
+6. Open browser: http://localhost:8080
 
 ## Cloud Foundry Deployment
 
@@ -154,6 +324,10 @@ The app automatically discovers services in this order:
 ├── runtime.txt                 # Python version
 ├── services-config.yml         # Service configuration (enable/disable services)
 ├── .cfignore                  # Files to ignore during CF push
+├── setup.sh                    # Setup script for macOS/Linux
+├── setup.bat                   # Setup script for Windows
+├── setup.py                    # Cross-platform setup script
+├── cli.py                      # Command-line interface
 ├── services/                   # Service handler modules
 │   ├── __init__.py
 │   ├── credential_helper.py   # Helper for Tanzu and UPS discovery

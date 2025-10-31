@@ -121,4 +121,178 @@ class MySQLHandler:
         finally:
             if cursor:
                 cursor.close()
+    
+    def list_tables(self):
+        """List all tables in the database"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get all tables
+            cursor.execute("SHOW TABLES")
+            tables = cursor.fetchall()
+            
+            # Get table information
+            table_list = []
+            for table in tables:
+                table_name = table[0]
+                # Get row count
+                cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
+                row_count = cursor.fetchone()[0]
+                
+                # Get table size and info
+                cursor.execute(f"""
+                    SELECT 
+                        table_rows,
+                        ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
+                    FROM information_schema.TABLES 
+                    WHERE table_schema = '{self.database}' 
+                    AND table_name = '{table_name}'
+                """)
+                table_info = cursor.fetchone()
+                
+                table_list.append({
+                    'name': table_name,
+                    'row_count': row_count if row_count is not None else 0,
+                    'estimated_rows': table_info[0] if table_info and table_info[0] else 0,
+                    'size_mb': table_info[1] if table_info and table_info[1] else 0
+                })
+            
+            return {
+                'database': self.database,
+                'tables': table_list,
+                'count': len(table_list)
+            }
+        except Error as e:
+            raise Exception(f"Failed to list MySQL tables: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def get_table_data(self, table_name, limit=100, offset=0):
+        """Get data from a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(dictionary=True)  # Return as dictionary
+            
+            # Get column names
+            cursor.execute(f"DESCRIBE `{table_name}`")
+            columns = [col['Field'] for col in cursor.fetchall()]
+            
+            # Get total row count
+            cursor.execute(f"SELECT COUNT(*) as count FROM `{table_name}`")
+            total_rows = cursor.fetchone()['count']
+            
+            # Get data with limit and offset
+            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT %s OFFSET %s", (limit, offset))
+            rows = cursor.fetchall()
+            
+            return {
+                'table': table_name,
+                'columns': columns,
+                'rows': rows,
+                'total_rows': total_rows,
+                'limit': limit,
+                'offset': offset,
+                'returned_rows': len(rows)
+            }
+        except Error as e:
+            raise Exception(f"Failed to get MySQL table data: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def create_row(self, table_name, data):
+        """Insert a new row into a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # Build INSERT statement
+            columns = list(data.keys())
+            placeholders = ', '.join(['%s'] * len(columns))
+            values = list(data.values())
+            
+            insert_sql = f"INSERT INTO `{table_name}` ({', '.join([f'`{col}`' for col in columns])}) VALUES ({placeholders})"
+            cursor.execute(insert_sql, values)
+            insert_id = cursor.lastrowid
+            
+            conn.commit()
+            
+            return {
+                'action': 'create',
+                'table': table_name,
+                'insert_id': insert_id,
+                'data': data,
+                'status': 'success'
+            }
+        except Error as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to create row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def update_row(self, table_name, where_clause, where_params, update_data):
+        """Update rows in a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Build UPDATE statement
+            set_clause = ', '.join([f"`{col}` = %s" for col in update_data.keys()])
+            values = list(update_data.values()) + list(where_params)
+            
+            update_sql = f"UPDATE `{table_name}` SET {set_clause} WHERE {where_clause}"
+            cursor.execute(update_sql, values)
+            affected_rows = cursor.rowcount
+            
+            conn.commit()
+            
+            return {
+                'action': 'update',
+                'table': table_name,
+                'affected_rows': affected_rows,
+                'update_data': update_data,
+                'status': 'success'
+            }
+        except Error as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to update row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
+    
+    def delete_row(self, table_name, where_clause, where_params):
+        """Delete rows from a table"""
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            delete_sql = f"DELETE FROM `{table_name}` WHERE {where_clause}"
+            cursor.execute(delete_sql, where_params)
+            affected_rows = cursor.rowcount
+            
+            conn.commit()
+            
+            return {
+                'action': 'delete',
+                'table': table_name,
+                'affected_rows': affected_rows,
+                'status': 'success'
+            }
+        except Error as e:
+            if conn:
+                conn.rollback()
+            raise Exception(f"Failed to delete row: {str(e)}")
+        finally:
+            if cursor:
+                cursor.close()
 

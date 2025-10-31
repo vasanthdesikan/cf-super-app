@@ -93,4 +93,115 @@ class ValkeyHandler:
             }
         except Exception as e:
             raise Exception(f"Valkey transaction failed: {str(e)}")
+    
+    def list_keys(self, pattern='*', limit=100):
+        """List keys in the cache"""
+        try:
+            client = self._get_client()
+            
+            # Get keys matching pattern
+            keys = client.keys(pattern)
+            
+            # Limit results
+            if limit and len(keys) > limit:
+                keys = keys[:limit]
+            
+            # Get key info (value, TTL)
+            key_list = []
+            for key in keys:
+                ttl = client.ttl(key)
+                key_type = client.type(key)
+                key_info = {
+                    'key': key,
+                    'type': key_type,
+                    'ttl': ttl if ttl > 0 else None,
+                    'exists': True
+                }
+                
+                # Get value preview (first 100 chars)
+                if key_type == 'string':
+                    value = client.get(key)
+                    if value:
+                        key_info['value_preview'] = value[:100] + ('...' if len(value) > 100 else '')
+                
+                key_list.append(key_info)
+            
+            return {
+                'pattern': pattern,
+                'keys': key_list,
+                'count': len(key_list),
+                'total_found': len(client.keys(pattern)) if not limit else None
+            }
+        except Exception as e:
+            raise Exception(f"Failed to list Valkey keys: {str(e)}")
+    
+    def delete_key(self, key):
+        """Delete a key from the cache"""
+        try:
+            client = self._get_client()
+            result = client.delete(key)
+            return {
+                'action': 'delete',
+                'key': key,
+                'deleted': result > 0,
+                'status': 'success'
+            }
+        except Exception as e:
+            raise Exception(f"Failed to delete Valkey key: {str(e)}")
+    
+    def get_key(self, key):
+        """Get a key's value from the cache (READ)"""
+        try:
+            client = self._get_client()
+            value = client.get(key)
+            key_type = client.type(key)
+            ttl = client.ttl(key)
+            
+            return {
+                'action': 'get',
+                'key': key,
+                'value': value,
+                'type': key_type,
+                'ttl': ttl if ttl > 0 else None,
+                'exists': value is not None,
+                'status': 'success'
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get Valkey key: {str(e)}")
+    
+    def set_key(self, key, value, ttl=None):
+        """Set a key's value in the cache (CREATE/UPDATE)"""
+        try:
+            client = self._get_client()
+            
+            if ttl:
+                result = client.setex(key, ttl, value)
+            else:
+                result = client.set(key, value)
+            
+            return {
+                'action': 'set',
+                'key': key,
+                'value': value,
+                'ttl': ttl,
+                'result': result,
+                'status': 'success'
+            }
+        except Exception as e:
+            raise Exception(f"Failed to set Valkey key: {str(e)}")
+    
+    def exists_key(self, key):
+        """Check if a key exists"""
+        try:
+            client = self._get_client()
+            exists = client.exists(key)
+            
+            return {
+                'action': 'exists',
+                'key': key,
+                'exists': exists > 0,
+                'status': 'success'
+            }
+        except Exception as e:
+            raise Exception(f"Failed to check Valkey key existence: {str(e)}")
 

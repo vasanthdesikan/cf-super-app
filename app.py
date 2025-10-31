@@ -10,13 +10,28 @@ import yaml
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime
 
-# Import service handlers
-from services.rabbitmq_handler import RabbitMQHandler
-from services.valkey_handler import ValkeyHandler
-from services.mysql_handler import MySQLHandler
-from services.postgres_handler import PostgresHandler
-
 app = Flask(__name__)
+
+# Lazy import service handlers (only when needed)
+def import_handler(handler_name):
+    """Import service handler dynamically"""
+    try:
+        if handler_name == 'rabbitmq':
+            from services.rabbitmq_handler import RabbitMQHandler
+            return RabbitMQHandler
+        elif handler_name == 'valkey':
+            from services.valkey_handler import ValkeyHandler
+            return ValkeyHandler
+        elif handler_name == 'mysql':
+            from services.mysql_handler import MySQLHandler
+            return MySQLHandler
+        elif handler_name == 'postgres':
+            from services.postgres_handler import PostgresHandler
+            return PostgresHandler
+    except ImportError as e:
+        app.logger.warning(f"Failed to import {handler_name} handler: {e}")
+        return None
+    return None
 
 # Load services configuration
 def load_services_config():
@@ -35,7 +50,11 @@ def init_service_handlers():
     # RabbitMQ
     if config.get('rabbitmq', {}).get('enabled', False):
         try:
-            handlers['rabbitmq'] = RabbitMQHandler()
+            HandlerClass = import_handler('rabbitmq')
+            if HandlerClass:
+                handlers['rabbitmq'] = HandlerClass()
+            else:
+                handlers['rabbitmq'] = None
         except Exception as e:
             app.logger.warning(f"Failed to initialize RabbitMQ: {e}")
             handlers['rabbitmq'] = None
@@ -43,7 +62,11 @@ def init_service_handlers():
     # Valkey
     if config.get('valkey', {}).get('enabled', False):
         try:
-            handlers['valkey'] = ValkeyHandler()
+            HandlerClass = import_handler('valkey')
+            if HandlerClass:
+                handlers['valkey'] = HandlerClass()
+            else:
+                handlers['valkey'] = None
         except Exception as e:
             app.logger.warning(f"Failed to initialize Valkey: {e}")
             handlers['valkey'] = None
@@ -51,7 +74,11 @@ def init_service_handlers():
     # MySQL
     if config.get('mysql', {}).get('enabled', False):
         try:
-            handlers['mysql'] = MySQLHandler()
+            HandlerClass = import_handler('mysql')
+            if HandlerClass:
+                handlers['mysql'] = HandlerClass()
+            else:
+                handlers['mysql'] = None
         except Exception as e:
             app.logger.warning(f"Failed to initialize MySQL: {e}")
             handlers['mysql'] = None
@@ -59,7 +86,11 @@ def init_service_handlers():
     # PostgreSQL
     if config.get('postgres', {}).get('enabled', False):
         try:
-            handlers['postgres'] = PostgresHandler()
+            HandlerClass = import_handler('postgres')
+            if HandlerClass:
+                handlers['postgres'] = HandlerClass()
+            else:
+                handlers['postgres'] = None
         except Exception as e:
             app.logger.warning(f"Failed to initialize PostgreSQL: {e}")
             handlers['postgres'] = None
@@ -122,6 +153,54 @@ def test_service(service_name):
         })
     except Exception as e:
         app.logger.error(f"Error testing {service_name}: {e}")
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/list/<service_name>', methods=['GET'])
+def list_service_resources(service_name):
+    """List resources for a specific service (tables, queues, keys)"""
+    if service_name not in service_handlers or service_handlers[service_name] is None:
+        return jsonify({
+            'success': False,
+            'error': f'Service {service_name} is not enabled or initialized'
+        }), 404
+    
+    handler = service_handlers[service_name]
+    
+    try:
+        if service_name in ['mysql', 'postgres']:
+            # Check if table parameter is provided to get table data
+            table_name = request.args.get('table')
+            if table_name:
+                limit = int(request.args.get('limit', 100))
+                offset = int(request.args.get('offset', 0))
+                result = handler.get_table_data(table_name, limit=limit, offset=offset)
+            else:
+                result = handler.list_tables()
+        elif service_name == 'rabbitmq':
+            result = handler.list_queues()
+        elif service_name == 'valkey':
+            pattern = request.args.get('pattern', '*')
+            limit = int(request.args.get('limit', 100))
+            result = handler.list_keys(pattern=pattern, limit=limit)
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Listing not supported for service {service_name}'
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'service': service_name,
+            'timestamp': datetime.now().isoformat(),
+            'data': result
+        })
+    except Exception as e:
+        app.logger.error(f"Error listing {service_name} resources: {e}")
         return jsonify({
             'success': False,
             'service': service_name,

@@ -1,55 +1,19 @@
 """RabbitMQ Service Handler"""
 
-import os
-import json
 import pika
 from datetime import datetime
-from urllib.parse import urlparse
-from .credential_helper import find_service_credentials, get_connection_params_from_creds
+from .base_handler import MessageQueueHandler
 
-class RabbitMQHandler:
+class RabbitMQHandler(MessageQueueHandler):
     """Handler for RabbitMQ transactions"""
     
     def __init__(self):
         """Initialize RabbitMQ connection"""
-        # Service types to search for (Tanzu Data Services and standard)
-        service_types = [
-            'p.rabbitmq',      # Tanzu Data Services
-            'p-rabbitmq',      # Standard Cloud Foundry
-            'p.rabbitmq-for-kubernetes',
-            'rabbitmq',
-            'p.rabbitmq-for-kubernetes'
-        ]
-        
-        # Try to find credentials from VCAP_SERVICES (supports Tanzu and UPS)
-        creds = find_service_credentials(service_types)
-        
-        if creds:
-            # Check if URI is available (common in Tanzu services)
-            uri = creds.get('uri') or creds.get('url') or creds.get('amqp_uri')
-            if uri:
-                parsed = urlparse(uri)
-                self.host = parsed.hostname or 'localhost'
-                self.port = parsed.port or 5672
-                self.username = parsed.username or 'guest'
-                self.password = parsed.password or 'guest'
-                self.vhost = parsed.path.lstrip('/') if parsed.path else '/'
-            else:
-                # Extract from credential dictionary
-                params = get_connection_params_from_creds(creds, 'localhost', 5672)
-                self.host = params['host']
-                self.port = params['port'] or 5672
-                self.username = params['username'] or 'guest'
-                self.password = params['password'] or 'guest'
-                self.vhost = params['vhost'] or '/'
-        else:
-            # Fallback to environment variables
-            self.host = os.environ.get('RABBITMQ_HOST', 'localhost')
-            self.port = int(os.environ.get('RABBITMQ_PORT', 5672))
-            self.username = os.environ.get('RABBITMQ_USER', 'guest')
-            self.password = os.environ.get('RABBITMQ_PASS', 'guest')
-            self.vhost = os.environ.get('RABBITMQ_VHOST', '/')
-        
+        super().__init__(
+            service_types=['p.rabbitmq', 'p-rabbitmq', 'rabbitmq'],
+            default_port=5672,
+            env_prefix='RABBITMQ'
+        )
         self.connection = None
         self.channel = None
     

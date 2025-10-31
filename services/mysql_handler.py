@@ -1,56 +1,24 @@
 """MySQL Service Handler"""
 
-import os
-import json
 import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
-from urllib.parse import urlparse, unquote
-from .credential_helper import find_service_credentials, get_connection_params_from_creds
+from .base_handler import DatabaseHandler
 
-class MySQLHandler:
+class MySQLHandler(DatabaseHandler):
     """Handler for MySQL transactions"""
     
     def __init__(self):
         """Initialize MySQL connection"""
-        # Service types to search for (Tanzu Data Services and standard)
-        service_types = [
-            'p.mysql',          # Tanzu Data Services
-            'p-mysql',          # Standard Cloud Foundry
-            'p.mysql-for-kubernetes',
-            'mysql'
-        ]
-        
-        # Try to find credentials from VCAP_SERVICES (supports Tanzu and UPS)
-        creds = find_service_credentials(service_types)
-        
-        if creds:
-            # Check if URI is available (common in Tanzu services)
-            uri = creds.get('uri') or creds.get('url') or creds.get('jdbcUrl') or creds.get('jdbc_url')
-            if uri:
-                # Handle MySQL URI format: mysql://user:pass@host:port/db
-                parsed = urlparse(uri.replace('mysql2://', 'mysql://'))
-                self.host = parsed.hostname or 'localhost'
-                self.port = parsed.port or 3306
-                self.username = unquote(parsed.username) if parsed.username else 'root'
-                self.password = unquote(parsed.password) if parsed.password else ''
-                self.database = parsed.path.lstrip('/') if parsed.path else 'testdb'
-            else:
-                # Extract from credential dictionary
-                params = get_connection_params_from_creds(creds, 'localhost', 3306)
-                self.host = params['host']
-                self.port = params['port'] or 3306
-                self.database = params['database'] or 'testdb'
-                self.username = params['username'] or 'root'
-                self.password = params['password'] or ''
-        else:
-            # Fallback to environment variables
-            self.host = os.environ.get('MYSQL_HOST', 'localhost')
-            self.port = int(os.environ.get('MYSQL_PORT', 3306))
-            self.database = os.environ.get('MYSQL_DATABASE', 'testdb')
-            self.username = os.environ.get('MYSQL_USER', 'root')
-            self.password = os.environ.get('MYSQL_PASSWORD', '')
-        
+        super().__init__(
+            service_types=['p.mysql', 'p-mysql', 'mysql'],
+            default_port=3306,
+            env_prefix='MYSQL'
+        )
+        if not self.database:
+            self.database = 'testdb'
+        if not self.username:
+            self.username = 'root'
         self.connection = None
     
     def _get_connection(self):

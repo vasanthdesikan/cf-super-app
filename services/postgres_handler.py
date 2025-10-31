@@ -1,58 +1,24 @@
 """PostgreSQL Service Handler"""
 
-import os
-import json
 import psycopg2
 from psycopg2 import sql
 from datetime import datetime
-from urllib.parse import urlparse, unquote
-from .credential_helper import find_service_credentials, get_connection_params_from_creds
+from .base_handler import DatabaseHandler
 
-class PostgresHandler:
+class PostgresHandler(DatabaseHandler):
     """Handler for PostgreSQL transactions"""
     
     def __init__(self):
         """Initialize PostgreSQL connection"""
-        # Service types to search for (Tanzu Data Services and standard)
-        service_types = [
-            'p.postgresql',     # Tanzu Data Services
-            'p-postgresql',     # Standard Cloud Foundry
-            'p.postgresql-for-kubernetes',
-            'postgresql',
-            'postgres',
-            'p.postgres'
-        ]
-        
-        # Try to find credentials from VCAP_SERVICES (supports Tanzu and UPS)
-        creds = find_service_credentials(service_types)
-        
-        if creds:
-            # Check if URI is available (common in Tanzu services)
-            uri = creds.get('uri') or creds.get('url') or creds.get('jdbcUrl') or creds.get('jdbc_url')
-            if uri:
-                # Handle PostgreSQL URI format: postgresql://user:pass@host:port/db
-                parsed = urlparse(uri.replace('postgres://', 'postgresql://'))
-                self.host = parsed.hostname or 'localhost'
-                self.port = parsed.port or 5432
-                self.username = unquote(parsed.username) if parsed.username else 'postgres'
-                self.password = unquote(parsed.password) if parsed.password else ''
-                self.database = parsed.path.lstrip('/') if parsed.path else 'postgres'
-            else:
-                # Extract from credential dictionary
-                params = get_connection_params_from_creds(creds, 'localhost', 5432)
-                self.host = params['host']
-                self.port = params['port'] or 5432
-                self.database = params['database'] or 'postgres'
-                self.username = params['username'] or 'postgres'
-                self.password = params['password'] or ''
-        else:
-            # Fallback to environment variables
-            self.host = os.environ.get('POSTGRES_HOST', 'localhost')
-            self.port = int(os.environ.get('POSTGRES_PORT', 5432))
-            self.database = os.environ.get('POSTGRES_DATABASE', 'postgres')
-            self.username = os.environ.get('POSTGRES_USER', 'postgres')
-            self.password = os.environ.get('POSTGRES_PASSWORD', '')
-        
+        super().__init__(
+            service_types=['p.postgresql', 'p-postgresql', 'postgresql', 'postgres'],
+            default_port=5432,
+            env_prefix='POSTGRES'
+        )
+        if not self.database:
+            self.database = 'postgres'
+        if not self.username:
+            self.username = 'postgres'
         self.connection = None
     
     def _get_connection(self):

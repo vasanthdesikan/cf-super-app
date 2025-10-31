@@ -15,7 +15,8 @@ from tabulate import tabulate
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app import init_service_handlers, load_services_config, service_handlers
+from core.handler_manager import HandlerManager
+from core.exceptions import ServiceNotFoundError
 
 def format_json(data, indent=2):
     """Format data as JSON"""
@@ -356,15 +357,14 @@ Examples:
         parser.print_help()
         sys.exit(1)
     
-    # Initialize handlers (reuse from app)
-    handlers = service_handlers
-    
-    if args.service not in handlers or handlers[args.service] is None:
-        print(f"Error: {args.service} service is not enabled or initialized", file=sys.stderr)
+    # Get handler using dependency injection
+    try:
+        handler_manager = HandlerManager()
+        handler = handler_manager.get_handler(args.service)
+    except ServiceNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
         print("Check services-config.yml to ensure the service is enabled", file=sys.stderr)
         sys.exit(1)
-    
-    handler = handlers[args.service]
     
     # Execute action
     try:

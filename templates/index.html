@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Foundry Service Tester</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+            flex-wrap: wrap;
+        }
+        
+        .tab-button {
+            padding: 15px 30px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .tab-button:hover {
+            background: #e9e9e9;
+            color: #333;
+        }
+        
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: white;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 40px;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .service-form {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            display: block;
+        }
+        
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            display: block;
+        }
+        
+        .result pre {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .no-services {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .no-services h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Cloud Foundry Service Tester</h1>
+            <p>Test transactions to your backend services</p>
+        </div>
+        
+        <div id="tabs-container">
+            <div class="tabs" id="tabs"></div>
+            <div id="tab-contents">
+                <div class="no-services">
+                    <h2>No Services Configured</h2>
+                    <p>Please enable services in services-config.yml</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const services = {{ services | tojson }};
+        
+        // Service-specific form fields
+        const serviceForms = {
+            rabbitmq: {
+                queue_name: { type: 'text', label: 'Queue Name', value: 'test_queue', required: true },
+                message: { type: 'textarea', label: 'Message', value: 'Hello from RabbitMQ!', required: true }
+            },
+            valkey: {
+                key: { type: 'text', label: 'Key', value: 'test_key', required: true },
+                value: { type: 'textarea', label: 'Value', value: 'Hello from Valkey!', required: true }
+            },
+            mysql: {
+                table_name: { type: 'text', label: 'Table Name', value: 'test_table', required: true },
+                value: { type: 'textarea', label: 'Test Value', value: 'Hello from MySQL!', required: true }
+            },
+            postgres: {
+                table_name: { type: 'text', label: 'Table Name', value: 'test_table', required: true },
+                value: { type: 'textarea', label: 'Test Value', value: 'Hello from PostgreSQL!', required: true }
+            }
+        };
+        
+        // Initialize tabs
+        function initializeTabs() {
+            const tabsContainer = document.getElementById('tabs');
+            const tabContentsContainer = document.getElementById('tab-contents');
+            
+            if (Object.keys(services).length === 0) {
+                return;
+            }
+            
+            tabsContainer.innerHTML = '';
+            tabContentsContainer.innerHTML = '';
+            
+            let firstTab = true;
+            
+            for (const [serviceId, service] of Object.entries(services)) {
+                if (!service.enabled) continue;
+                
+                // Create tab button
+                const tabButton = document.createElement('button');
+                tabButton.className = `tab-button ${firstTab ? 'active' : ''}`;
+                tabButton.textContent = service.display_name;
+                tabButton.onclick = (e) => switchTab(serviceId, e);
+                tabsContainer.appendChild(tabButton);
+                
+                // Create tab content
+                const tabContent = document.createElement('div');
+                tabContent.className = `tab-content ${firstTab ? 'active' : ''}`;
+                tabContent.id = `tab-${serviceId}`;
+                tabContent.innerHTML = createServiceForm(serviceId, service.display_name);
+                tabContentsContainer.appendChild(tabContent);
+                
+                firstTab = false;
+            }
+        }
+        
+        function switchTab(serviceId, event) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                // Find the button for this service
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    if (btn.textContent === services[serviceId].display_name) {
+                        btn.classList.add('active');
+                    }
+                });
+            }
+            
+            // Update tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${serviceId}`).classList.add('active');
+        }
+        
+        function createServiceForm(serviceId, displayName) {
+            const formFields = serviceForms[serviceId] || {};
+            
+            let formHTML = `
+                <div class="service-form">
+                    <h2>${displayName} Transaction Test</h2>
+                    <form id="form-${serviceId}" onsubmit="testService('${serviceId}', event)">
+            `;
+            
+            for (const [fieldName, fieldConfig] of Object.entries(formFields)) {
+                formHTML += `
+                    <div class="form-group">
+                        <label for="${serviceId}-${fieldName}">${fieldConfig.label}</label>
+                        <${fieldConfig.type} 
+                            id="${serviceId}-${fieldName}" 
+                            name="${fieldName}" 
+                            value="${fieldConfig.value}"
+                            ${fieldConfig.required ? 'required' : ''}
+                            ${fieldConfig.type === 'textarea' ? `>${fieldConfig.value}</textarea>` : '>'}
+                        ${fieldConfig.type !== 'textarea' ? `</${fieldConfig.type}>` : ''}
+                    </div>
+                `;
+            }
+            
+            formHTML += `
+                        <button type="submit" class="btn" id="btn-${serviceId}">Test ${displayName}</button>
+                    </form>
+                    <div id="result-${serviceId}" class="result"></div>
+                </div>
+            `;
+            
+            return formHTML;
+        }
+        
+        async function testService(serviceId, event) {
+            event.preventDefault();
+            
+            const form = document.getElementById(`form-${serviceId}`);
+            const resultDiv = document.getElementById(`result-${serviceId}`);
+            const btn = document.getElementById(`btn-${serviceId}`);
+            
+            // Get form data
+            const formData = new FormData(form);
+            const data = {};
+            for (const [key, value] of formData.entries()) {
+                data[key] = value;
+            }
+            
+            // Show loading state
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Testing...';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '';
+            
+            try {
+                const response = await fetch(`/api/test/${serviceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h3>✓ Transaction Successful</h3>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <h3>✗ Transaction Failed</h3>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>✗ Error</h3>
+                    <pre>${error.message}</pre>
+                `;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `Test ${services[serviceId].display_name}`;
+            }
+        }
+        
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', initializeTabs);
+    </script>
+</body>
+</html>
+

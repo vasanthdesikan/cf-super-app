@@ -1,0 +1,21 @@
+# Services Configuration Manifest
+# Enable/disable services by setting enabled to true/false
+# Only enabled services will show tabs in the UI
+
+services:
+  rabbitmq:
+    enabled: true
+    display_name: "RabbitMQ"
+    
+  valkey:
+    enabled: true
+    display_name: "Valkey"
+    
+  mysql:
+    enabled: true
+    display_name: "MySQL"
+    
+  postgres:
+    enabled: true
+    display_name: "PostgreSQL"
+

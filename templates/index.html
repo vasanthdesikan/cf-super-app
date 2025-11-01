@@ -348,6 +348,13 @@
             }
         };
         
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         // Initialize tabs
         function initializeTabs() {
             const tabsContainer = document.getElementById('tabs');
@@ -819,10 +826,48 @@
                 
                 if (response.ok && result.success) {
                     resultDiv.className = 'result success';
-                    resultDiv.innerHTML = `
-                        <h3>✓ Transaction Successful</h3>
-                        <pre>${JSON.stringify(result, null, 2)}</pre>
-                    `;
+                    
+                    // Special display format for valkey
+                    if (serviceId === 'valkey' && result.data) {
+                        const key = result.data.key || 'N/A';
+                        const setValue = result.data.set_value || 'N/A';
+                        const retrievedValue = result.data.retrieved_value || 'N/A';
+                        const ttl = result.data.ttl !== undefined ? result.data.ttl : 'N/A';
+                        
+                        resultDiv.innerHTML = `
+                            <h3>✓ Transaction Successful</h3>
+                            <div style="margin-top: 15px;">
+                                <div style="margin-bottom: 15px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 6px;">
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Key:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px;">${escapeHtml(String(key))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Value Set:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(setValue))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Value Retrieved:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(retrievedValue))}</div>
+                                    </div>
+                                    <div>
+                                        <strong style="color: #667eea;">TTL:</strong>
+                                        <span style="margin-left: 10px;">${ttl !== 'N/A' ? ttl + ' seconds' : 'No expiration'}</span>
+                                    </div>
+                                </div>
+                                <details style="margin-top: 15px;">
+                                    <summary style="cursor: pointer; color: #667eea; font-weight: 500;">View Full JSON Response</summary>
+                                    <pre style="margin-top: 10px;">${JSON.stringify(result, null, 2)}</pre>
+                                </details>
+                            </div>
+                        `;
+                    } else {
+                        // Default display for other services
+                        resultDiv.innerHTML = `
+                            <h3>✓ Transaction Successful</h3>
+                            <pre>${JSON.stringify(result, null, 2)}</pre>
+                        `;
+                    }
                 } else {
                     resultDiv.className = 'result error';
                     resultDiv.innerHTML = `

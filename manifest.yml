@@ -10,7 +10,7 @@ applications:
   services:
     # Add your service instances here, for example:
     # - my-rabbitmq-service
-    # - my-valkey-service
+     - my-valkey-service
      - my-mysql-service
      - my-postgres-service
 

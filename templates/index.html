@@ -920,6 +920,51 @@
                                 </details>
                             </div>
                         `;
+                    } else if ((serviceId === 'mysql' || serviceId === 'postgres') && result.data) {
+                        // Special display format for MySQL and PostgreSQL
+                        const table = result.data.table || 'N/A';
+                        const insertId = result.data.insert_id || 'N/A';
+                        const insertedValue = result.data.inserted_value || 'N/A';
+                        const retrievedRow = result.data.retrieved_row || {};
+                        const retrievedId = retrievedRow.id || 'N/A';
+                        const retrievedValue = retrievedRow.test_value || 'N/A';
+                        const createdAt = retrievedRow.created_at || 'N/A';
+                        
+                        resultDiv.innerHTML = `
+                            <h3>✓ Transaction Successful</h3>
+                            <div style="margin-top: 15px;">
+                                <div style="margin-bottom: 15px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 6px;">
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Table:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px;">${escapeHtml(String(table))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Insert ID:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px;">${escapeHtml(String(insertId))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Value Inserted:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(insertedValue))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Retrieved Row:</strong>
+                                        <div style="margin-top: 5px; padding: 8px; background: white; border-radius: 4px;">
+                                            <div style="margin-bottom: 5px;"><strong>ID:</strong> <span style="font-family: monospace;">${escapeHtml(String(retrievedId))}</span></div>
+                                            <div style="margin-bottom: 5px;"><strong>Value:</strong> <span style="font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(retrievedValue))}</span></div>
+                                            <div><strong>Created At:</strong> <span style="font-family: monospace;">${escapeHtml(String(createdAt))}</span></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <strong style="color: #667eea;">Action:</strong>
+                                        <span style="margin-left: 10px;">${result.data.action || 'insert_and_select'}</span>
+                                    </div>
+                                </div>
+                                <details style="margin-top: 15px;">
+                                    <summary style="cursor: pointer; color: #667eea; font-weight: 500;">View Full JSON Response</summary>
+                                    <pre style="margin-top: 10px;">${JSON.stringify(result, null, 2)}</pre>
+                                </details>
+                            </div>
+                        `;
                     } else {
                         // Default display for other services
                         resultDiv.innerHTML = `

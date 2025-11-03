@@ -694,19 +694,31 @@
         }
         
         function displayQueues(data, container) {
-            if (data.note) {
-                container.innerHTML = `<p style="color: #666; padding: 15px; background: #f0f0f0; border-radius: 6px;">${data.note}</p>`;
-                return;
-            }
-            
             if (!data.queues || data.queues.length === 0) {
-                container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No queues found in vhost ' + data.vhost + '</p>';
+                let html = '';
+                if (data.note) {
+                    html = `<div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; margin-bottom: 15px;">
+                        <strong style="color: #856404;">ℹ Note:</strong>
+                        <p style="color: #856404; margin-top: 8px; margin-bottom: 0;">${data.note}</p>
+                    </div>`;
+                }
+                html += '<p style="color: #666; text-align: center; padding: 20px;">No queues found in vhost ' + (data.vhost || '/') + '</p>';
+                container.innerHTML = html;
                 return;
             }
             
-            let html = `
+            // Show note if present (but don't let it prevent queue display)
+            let noteHtml = '';
+            if (data.note) {
+                noteHtml = `<div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; margin-bottom: 15px;">
+                    <strong style="color: #856404;">ℹ Note:</strong>
+                    <p style="color: #856404; margin-top: 8px; margin-bottom: 0;">${data.note}</p>
+                </div>`;
+            }
+            
+            let html = noteHtml + `
                 <p style="margin-bottom: 15px; color: #666;">
-                    Virtual Host: <strong>${data.vhost}</strong> | 
+                    Virtual Host: <strong>${data.vhost || '/'}</strong> | 
                     Queues: <strong>${data.count}</strong>
                 </p>
                 <table class="resources-table">
@@ -726,9 +738,23 @@
                 if (queue.durable) badges.push('<span class="badge badge-primary">Durable</span>');
                 if (queue.auto_delete) badges.push('<span class="badge badge-info">Auto-delete</span>');
                 
+                // Build message contents display
+                let messageContentsHtml = '';
+                if (queue.message_contents && queue.message_contents.length > 0) {
+                    messageContentsHtml = '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd;">';
+                    messageContentsHtml += '<strong style="color: #667eea; font-size: 0.9em;">Queue Contents:</strong>';
+                    queue.message_contents.forEach((msg, idx) => {
+                        messageContentsHtml += `<div style="margin-top: 5px; padding: 6px; background: #f8f9fa; border-radius: 4px; font-family: monospace; font-size: 0.85em; word-wrap: break-word;">${escapeHtml(String(msg))}</div>`;
+                    });
+                    if (queue.messages > queue.message_contents.length) {
+                        messageContentsHtml += `<div style="margin-top: 5px; color: #666; font-size: 0.85em;">... and ${queue.messages - queue.message_contents.length} more message(s)</div>`;
+                    }
+                    messageContentsHtml += '</div>';
+                }
+                
                 html += `
                     <tr>
-                        <td><strong>${queue.name}</strong></td>
+                        <td><strong>${queue.name}</strong>${messageContentsHtml}</td>
                         <td>${queue.messages.toLocaleString()}</td>
                         <td>${queue.consumers}</td>
                         <td>${badges.join(' ')}</td>
@@ -853,6 +879,39 @@
                                     <div>
                                         <strong style="color: #667eea;">TTL:</strong>
                                         <span style="margin-left: 10px;">${ttl !== 'N/A' ? ttl + ' seconds' : 'No expiration'}</span>
+                                    </div>
+                                </div>
+                                <details style="margin-top: 15px;">
+                                    <summary style="cursor: pointer; color: #667eea; font-weight: 500;">View Full JSON Response</summary>
+                                    <pre style="margin-top: 10px;">${JSON.stringify(result, null, 2)}</pre>
+                                </details>
+                            </div>
+                        `;
+                    } else if (serviceId === 'rabbitmq' && result.data) {
+                        // Special display format for rabbitmq
+                        const queue = result.data.queue || 'N/A';
+                        const published = result.data.published || 'N/A';
+                        const consumed = result.data.consumed || 'N/A';
+                        
+                        resultDiv.innerHTML = `
+                            <h3>✓ Transaction Successful</h3>
+                            <div style="margin-top: 15px;">
+                                <div style="margin-bottom: 15px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 6px;">
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Queue Name:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px;">${escapeHtml(String(queue))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Message Published:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(published))}</div>
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        <strong style="color: #667eea;">Message Consumed:</strong>
+                                        <div style="font-family: monospace; padding: 8px; background: white; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(String(consumed))}</div>
+                                    </div>
+                                    <div>
+                                        <strong style="color: #667eea;">Action:</strong>
+                                        <span style="margin-left: 10px;">${result.data.action || 'publish_and_consume'}</span>
                                     </div>
                                 </div>
                                 <details style="margin-top: 15px;">

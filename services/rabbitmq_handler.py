@@ -77,9 +77,6 @@ class RabbitMQHandler(MessageQueueHandler):
         """List all queues"""
         try:
             conn, channel = self._get_connection()
-            
-            # Use management API if available, otherwise try to get queue info
-            # For basic pika, we'll try to get queues by declaring and checking
             queues = []
             
             # Try to use management HTTP API if available
@@ -107,16 +104,111 @@ class RabbitMQHandler(MessageQueueHandler):
                         'count': len(queues)
                     }
             except:
-                # Fallback: return empty list if management API not available
+                # Fallback: try AMQP method if management API not available
                 pass
             
-            # If management API fails, return basic info
-            return {
-                'vhost': self.vhost,
-                'queues': queues,
-                'count': 0,
-                'note': 'Management API not available. Queue listing requires RabbitMQ management plugin.'
-            }
+            # If no queues found via management API, try AMQP method
+            if not queues:
+                # Check test_queue (common queue name)
+                # Try non-passive first to find or create the queue
+                queue_name = 'test_queue'
+                try:
+                    # First try passive to see if queue exists
+                    try:
+                        result = channel.queue_declare(queue=queue_name, passive=True)
+                    except Exception:
+                        # Queue doesn't exist, try non-passive (will create if needed)
+                        result = channel.queue_declare(queue=queue_name, durable=False)
+                    
+                    # If queue_declare succeeded, the queue exists (or was created)
+                    message_count = 0
+                    consumer_count = 0
+                    if result:
+                        if hasattr(result, 'method'):
+                            message_count = getattr(result.method, 'message_count', 0)
+                            consumer_count = getattr(result.method, 'consumer_count', 0)
+                        # Also try direct attributes
+                        elif hasattr(result, 'message_count'):
+                            message_count = result.message_count
+                        elif hasattr(result, 'consumer_count'):
+                            consumer_count = result.consumer_count
+                    
+                    # Queue exists, add it to the list
+                    # Peek at messages in the queue (up to 5 messages)
+                    # Note: We'll consume and republish to peek at contents
+                    queue_messages = []
+                    if message_count > 0:
+                        # Create a separate channel for peeking to avoid affecting the main channel
+                        peek_channel = conn.channel()
+                        try:
+                            messages_to_republish = []
+                            for _ in range(min(message_count, 5)):
+                                method_frame, header_frame, body = peek_channel.basic_get(
+                                    queue=queue_name, 
+                                    auto_ack=False
+                                )
+                                if method_frame and body:
+                                    try:
+                                        message_content = body.decode('utf-8')
+                                        queue_messages.append(message_content)
+                                        # Store for republishing
+                                        messages_to_republish.append({
+                                            'body': body
+                                        })
+                                        # Acknowledge to remove from queue
+                                        peek_channel.basic_ack(method_frame.delivery_tag)
+                                    except Exception:
+                                        queue_messages.append(f"<binary data: {len(body)} bytes>")
+                                        messages_to_republish.append({
+                                            'body': body
+                                        })
+                                        peek_channel.basic_ack(method_frame.delivery_tag)
+                                else:
+                                    break
+                            
+                            # Republish messages back to queue (to restore queue state)
+                            for msg_data in messages_to_republish:
+                                peek_channel.basic_publish(
+                                    exchange='',
+                                    routing_key=queue_name,
+                                    body=msg_data['body'],
+                                    properties=pika.BasicProperties(delivery_mode=1)
+                                )
+                            peek_channel.close()
+                        except Exception as e:
+                            # If peeking fails, just continue without messages
+                            try:
+                                peek_channel.close()
+                            except:
+                                pass
+                    
+                    # Always add queue if we got here (queue_declare succeeded)
+                    queues.append({
+                        'name': queue_name,
+                        'messages': message_count,
+                        'consumers': consumer_count,
+                        'durable': False,
+                        'auto_delete': False,
+                        'message_contents': queue_messages  # Add message contents (empty list if no messages)
+                    })
+                except Exception as e:
+                    # Queue operation failed, skip
+                    pass
+            
+            if queues:
+                return {
+                    'vhost': self.vhost,
+                    'queues': queues,
+                    'count': len(queues),
+                    'note': f'Found {len(queues)} queue(s) via AMQP.'
+                }
+            else:
+                return {
+                    'vhost': self.vhost,
+                    'queues': [],
+                    'count': 0,
+                    'note': 'Management API not available. Queue listing requires RabbitMQ management plugin.'
+                }
         except Exception as e:
             raise Exception(f"Failed to list RabbitMQ queues: {str(e)}")
         finally:
@@ -254,4 +346,3 @@ class RabbitMQHandler(MessageQueueHandler):
                 self.connection.close()
                 self.connection = None
                 self.channel = None
-

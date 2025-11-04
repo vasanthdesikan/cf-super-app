@@ -42,8 +42,26 @@ class ServiceHandler(ABC):
                 return
             
             # If no URI, use individual fields but don't default host to localhost
-            self._parse_credentials(creds)
+            try:
+                self._parse_credentials(creds)
+            except ValueError as e:
+                # If parsing fails, raise a more helpful error
+                raise ValueError(
+                    f"Unable to find connection information in service credentials. "
+                    f"Expected URI (uri/url/connection_string) or hostname. "
+                    f"Available credential keys: {list(creds.keys())}. "
+                    f"Error: {str(e)}"
+                )
         else:
+            # No credentials found - this means service not bound or not found in VCAP_SERVICES
+            # Try environment variables as fallback
+            env_host = os.environ.get(f'{self.env_prefix}_HOST')
+            if not env_host:
+                raise ValueError(
+                    f"Service not found in VCAP_SERVICES and no {self.env_prefix}_HOST environment variable. "
+                    f"Please bind a service or set environment variables. "
+                    f"Looking for service types: {service_types}"
+                )
             self._load_from_env()
     
     def _extract_uri(self, creds: Dict[str, Any]) -> Optional[str]:
@@ -53,18 +71,30 @@ class ServiceHandler(ABC):
     def _parse_uri(self, uri: str):
         """Parse URI (override in subclasses for specific parsing)"""
         parsed = urlparse(uri)
-        self.host = parsed.hostname or 'localhost'
+        if not parsed.hostname:
+            raise ValueError(f"URI does not contain a hostname: {uri}")
+        self.host = parsed.hostname
         self.port = parsed.port or self.default_port
     
     def _parse_credentials(self, creds: Dict[str, Any]):
         """Parse credentials dictionary (override in subclasses)"""
-        params = get_connection_params_from_creds(creds, 'localhost', self.default_port)
-        self.host = params['host']
+        params = get_connection_params_from_creds(creds, None, self.default_port)
+        self.host = params.get('host')
         self.port = params.get('port') or self.default_port
+        
+        # If no host found, raise error
+        if not self.host:
+            raise ValueError(f"No hostname found in credentials. Available keys: {list(creds.keys())}")
     
     def _load_from_env(self):
         """Load from environment variables"""
-        self.host = os.environ.get(f'{self.env_prefix}_HOST', 'localhost')
+        env_host = os.environ.get(f'{self.env_prefix}_HOST')
+        if not env_host:
+            raise ValueError(
+                f"Environment variable {self.env_prefix}_HOST is not set. "
+                f"Cannot connect to service without host information."
+            )
+        self.host = env_host
         port_str = os.environ.get(f'{self.env_prefix}_PORT', str(self.default_port))
         self.port = int(port_str)
     
@@ -95,7 +125,9 @@ class DatabaseHandler(ServiceHandler):
         self._connection_uri = uri
         # Also parse for individual fields as fallback
         parsed = urlparse(uri.replace('mysql2://', 'mysql://').replace('postgres://', 'postgresql://'))
-        self.host = parsed.hostname or 'localhost'
+        if not parsed.hostname:
+            raise ValueError(f"Database URI does not contain a hostname: {uri}")
+        self.host = parsed.hostname
         self.port = parsed.port or self.default_port
         self.username = unquote(parsed.username) if parsed.username else None
         self.password = unquote(parsed.password) if parsed.password else ''

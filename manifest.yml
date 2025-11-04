@@ -1,6 +1,7 @@
 ---
 applications:
-- name: service-tester
+# PostgreSQL application
+- name: service-tester-postgres
   memory: 512M
   instances: 1
   buildpack: python_buildpack
@@ -8,9 +9,38 @@ applications:
   env:
     PYTHONUNBUFFERED: 1
   services:
-    # Add your service instances here, for example:
-    # - my-rabbitmq-service
-     - my-valkey-service
-     - my-mysql-service
-     - my-postgres-service
+    - service-tester-postgres
+
+# MySQL application
+- name: service-tester-mysql
+  memory: 512M
+  instances: 1
+  buildpack: python_buildpack
+  command: python app.py
+  env:
+    PYTHONUNBUFFERED: 1
+  services:
+    - service-tester-mysql
+
+# RabbitMQ application
+- name: service-tester-rabbitmq
+  memory: 512M
+  instances: 1
+  buildpack: python_buildpack
+  command: python app.py
+  env:
+    PYTHONUNBUFFERED: 1
+  services:
+    - service-tester-rabbitmq
+
+# Valkey application
+- name: service-tester-valkey
+  memory: 512M
+  instances: 1
+  buildpack: python_buildpack
+  command: python app.py
+  env:
+    PYTHONUNBUFFERED: 1
+  services:
+    - service-tester-valkey
 

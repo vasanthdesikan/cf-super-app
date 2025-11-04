@@ -3,19 +3,59 @@
 import os
 import json
 
+def _unwrap_nested_credentials(creds, max_depth=5):
+    """
+    Unwrap nested credentials structure recursively.
+    Handles formats like {'credentials': {...}} or deeply nested structures.
+    """
+    if not creds or not isinstance(creds, dict) or max_depth <= 0:
+        return creds
+    
+    # Connection-related keys that indicate we've found actual credentials
+    connection_keys = ['hostname', 'host', 'uri', 'url', 'connection_string', 'connectionString',
+                       'username', 'user', 'userName', 'password', 'pass', 'Password',
+                       'database', 'db', 'name', 'databaseName', 'db_name',
+                       'port', 'Port', 'vhost', 'vHost', 'VHost',
+                       'jdbcUrl', 'jdbc_url', 'jdbc_uri', 'connectionUri', 'connection_uri',
+                       'amqp_uri', 'redis_uri', 'ssl', 'ssl_ca', 'service_gateway']
+    
+    # Check if current level has connection keys (we've found actual credentials)
+    if any(key in creds for key in connection_keys):
+        return creds
+    
+    # If 'credentials' key exists, unwrap it
+    if 'credentials' in creds:
+        nested = creds.get('credentials')
+        if isinstance(nested, dict):
+            unwrapped = _unwrap_nested_credentials(nested, max_depth - 1)
+            if unwrapped and isinstance(unwrapped, dict):
+                if any(key in unwrapped for key in connection_keys):
+                    return unwrapped
+                if 'credentials' in unwrapped and len(unwrapped) == 1:
+                    return _unwrap_nested_credentials(unwrapped.get('credentials'), max_depth - 1)
+                return unwrapped if unwrapped else creds
+    
+    # If only has 'credentials' key and nothing else, unwrap it
+    if len(creds) == 1 and 'credentials' in creds:
+        nested = creds.get('credentials')
+        if isinstance(nested, dict):
+            return _unwrap_nested_credentials(nested, max_depth - 1)
+    
+    return creds
+
 def find_service_credentials(service_types, service_name=None):
     """
     Find service credentials from VCAP_SERVICES.
     
-    Supports:
-    1. Tanzu Data Services (p.rabbitmq, p.mysql, etc.)
-    2. User Provisioned Services (UPS/CUPS) - identified by name or tags
-    3. Standard Cloud Foundry services
-    4. Service-key format credentials
+    Simple approach: Each app is bound to ONE service with a matching name.
+    - service-tester-postgres app → service-tester-postgres service
+    - service-tester-mysql app → service-tester-mysql service
+    - service-tester-rabbitmq app → service-tester-rabbitmq service
+    - service-tester-valkey app → service-tester-valkey service
     
     Args:
-        service_types: List of service type identifiers to search for
-        service_name: Optional service name to match
+        service_types: List of service type identifiers (used to determine expected service name)
+        service_name: Optional exact service instance name to match
     
     Returns:
         dict: Service credentials or None if not found
@@ -30,205 +70,137 @@ def find_service_credentials(service_types, service_name=None):
     except json.JSONDecodeError:
         return None
     
-    # Strategy 1: Look for Tanzu Data Services and standard service types
-    for service_type in service_types:
-        if service_type in vcap:
-            services = vcap[service_type]
-            if services and len(services) > 0:
-                # If service_name specified, try to match
-                if service_name:
-                    for svc in services:
-                        if svc.get('name') == service_name:
-                            creds = svc.get('credentials', {})
-                            if creds:
-                                # Handle nested credentials (service-key format)
-                                if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                                    creds = creds.get('credentials', {})
-                                return creds
-                # Otherwise return first service
-                creds = services[0].get('credentials', {})
+    # Map service types to expected service instance names
+    service_name_map = {
+        'postgres': 'service-tester-postgres',
+        'postgresql': 'service-tester-postgres',
+        'mysql': 'service-tester-mysql',
+        'rabbitmq': 'service-tester-rabbitmq',
+        'redis': 'service-tester-valkey',
+        'valkey': 'service-tester-valkey'
+    }
+    
+    # Determine expected service name
+    expected_service_name = service_name
+    if not expected_service_name:
+        # Find the expected service name from service types
+        for st in service_types:
+            clean_type = st.replace('p.', '').replace('p-', '').replace('.', '-').lower()
+            if clean_type in service_name_map:
+                expected_service_name = service_name_map[clean_type]
+                break
+    
+    if not expected_service_name:
+        return None
+    
+    # Search all services in VCAP_SERVICES for the expected service name
+    for service_type, services in vcap.items():
+        for service in services:
+            if service.get('name') == expected_service_name:
+                creds = service.get('credentials', {})
                 if creds:
-                    # Handle nested credentials (service-key format)
-                    if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                        creds = creds.get('credentials', {})
-                    return creds
-    
-    # Strategy 2: Look for User Provisioned Services (UPS/CUPS)
-    if 'user-provided' in vcap:
-        ups_services = vcap['user-provided']
-        
-        # First, try to match by service name (if provided)
-        if service_name:
-            for service in ups_services:
-                if service.get('name') == service_name:
-                    creds = service.get('credentials', {})
+                    creds = _unwrap_nested_credentials(creds)
                     if creds:
-                        # Handle nested credentials (service-key format)
-                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                            creds = creds.get('credentials', {})
-                        return creds
-        
-        # Then try to match by tags
-        for service in ups_services:
-            tags = service.get('tags', [])
-            tag_list = [tag.lower() for tag in tags]
-            
-            for service_type in service_types:
-                # Clean service type for comparison
-                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
-                
-                # Match various tag formats
-                if (clean_type in tag_list or 
-                    service_type.lower() in tag_list or
-                    clean_type.replace('postgresql', 'postgres') in tag_list or
-                    clean_type.replace('postgres', 'postgresql') in tag_list or
-                    'database' in tag_list and clean_type in ['mysql', 'postgres', 'postgresql'] or
-                    'cache' in tag_list and clean_type in ['redis', 'valkey'] or
-                    'queue' in tag_list and clean_type in ['rabbitmq']):
-                    creds = service.get('credentials', {})
-                    if creds:
-                        # Handle nested credentials (service-key format)
-                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                            creds = creds.get('credentials', {})
-                        return creds
-        
-        # Strategy 2b: Match by service name patterns (if no tags)
-        # Check if service name contains the service type
-        for service in ups_services:
-            service_name_check = service.get('name', '').lower()
-            for service_type in service_types:
-                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
-                # Check if service name contains the service type
-                if clean_type in service_name_check or service_type.lower() in service_name_check:
-                    creds = service.get('credentials', {})
-                    if creds:
-                        # Handle nested credentials (service-key format)
-                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                            creds = creds.get('credentials', {})
                         return creds
     
-    # Strategy 3: Search all services by name (if provided)
-    if service_name:
-        for service_type, services in vcap.items():
-            for service in services:
-                if service.get('name') == service_name:
-                    creds = service.get('credentials', {})
-                    if creds:
-                        # Handle nested credentials (service-key format)
-                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
-                            creds = creds.get('credentials', {})
-                        return creds
-    
-    # Strategy 4: Match by credential patterns (most aggressive - works even without tags)
-    # This handles cases where service might be bound but not tagged properly
-    if 'user-provided' in vcap:
-        ups_services = vcap['user-provided']
-        for service in ups_services:
-            creds = service.get('credentials', {})
-            if not creds:
-                continue
-            # Handle nested credentials (service-key format)
-            if isinstance(creds, dict) and 'credentials' in creds:
-                # If credentials only has 'credentials' key, it's likely nested
-                if len(creds) == 1 or all(k == 'credentials' for k in creds.keys() if k != 'credentials'):
-                    creds = creds.get('credentials', {})
-            
-            # Check if credentials have fields that match service type
-            for service_type in service_types:
-                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
-                
-                # Check for common credential patterns
-                if clean_type in ['mysql', 'postgres', 'postgresql']:
-                    # Database services should have hostname/host and database/name
-                    # OR have a URI
-                    has_host = creds.get('hostname') or creds.get('host')
-                    has_db = creds.get('database') or creds.get('name') or creds.get('db')
-                    has_uri = creds.get('uri') or creds.get('url') or creds.get('connection_string') or creds.get('connectionString')
-                    
-                    if has_uri or (has_host and has_db):
-                        return creds
-                elif clean_type in ['rabbitmq']:
-                    # RabbitMQ should have hostname/host and vhost OR URI
-                    has_host = creds.get('hostname') or creds.get('host')
-                    has_vhost = creds.get('vhost')
-                    has_uri = creds.get('uri') or creds.get('url') or creds.get('amqp_uri')
-                    
-                    if has_uri or (has_host and has_vhost):
-                        return creds
-                elif clean_type in ['redis', 'valkey']:
-                    # Redis/Valkey should have hostname/host OR URI
-                    if (creds.get('hostname') or creds.get('host') or 
-                        creds.get('uri') or creds.get('url') or 
-                        creds.get('redis_uri')):
-                        return creds
-    
+    # Not found
     return None
 
 def get_connection_params_from_creds(creds, default_host=None, default_port=None):
     """
     Extract connection parameters from credentials dictionary.
-    Handles various credential formats including service-key formats.
+    Handles various credential formats including URIs, connection strings, and structured credentials.
+    
+    Args:
+        creds: Credentials dictionary
+        default_host: Default hostname if not found in credentials
+        default_port: Default port if not found in credentials
+    
+    Returns:
+        dict: Connection parameters with keys: host, port, username, password, database, uri, etc.
     """
     if not creds:
         return {}
     
-    # Handle nested credentials (service-key format: {'credentials': {...}})
-    if isinstance(creds, dict):
-        # If credentials only has 'credentials' key, unwrap it
-        if 'credentials' in creds and (len(creds) == 1 or all(k == 'credentials' for k in creds.keys())):
-            creds = creds.get('credentials', {})
-        # Also check if it's a nested structure with other metadata
-        elif 'credentials' in creds and isinstance(creds.get('credentials'), dict):
-            # Prefer nested credentials if they exist
-            nested_creds = creds.get('credentials', {})
-            if nested_creds and len(nested_creds) > 0:
-                creds = nested_creds
+    # Unwrap nested credentials first
+    creds = _unwrap_nested_credentials(creds)
     
     if not creds:
         return {}
     
     params = {}
     
-    # URI variations (prioritize these for user-provided services)
-    uri = (
-        creds.get('uri') or 
-        creds.get('url') or 
-        creds.get('connection_string') or
-        creds.get('connectionString') or
-        creds.get('jdbcUrl') or
-        creds.get('jdbc_url') or
-        creds.get('connection_uri') or
-        creds.get('connectionUri')
-    )
-    if uri:
-        params['uri'] = uri
+    # Priority 1: URI extraction (highest priority - use URI directly)
+    # For PostgreSQL: prefer service_gateway.uri
+    # For MySQL: prefer top-level uri
+    # If only URI is present, use that
     
-    # Host/hostname variations (only if URI not found)
+    # Check for service_gateway URI first (for PostgreSQL)
+    service_gateway = creds.get('service_gateway', {})
+    if isinstance(service_gateway, dict) and service_gateway:
+        if service_gateway.get('uri'):
+            params['uri'] = service_gateway.get('uri')
+        elif service_gateway.get('jdbcUrl'):
+            params['uri'] = service_gateway.get('jdbcUrl')
+    
+    # If no service_gateway URI, check top-level URI (for MySQL or fallback)
     if not params.get('uri'):
-        params['host'] = (
-            creds.get('hostname') or 
-            creds.get('host') or 
-            creds.get('hostname_or_ip') or
-            creds.get('hostName') or
-            creds.get('HostName') or
-            default_host
+        uri = (
+            creds.get('uri') or 
+            creds.get('url') or 
+            creds.get('connection_string') or
+            creds.get('connectionString') or
+            creds.get('jdbcUrl') or 
+            creds.get('jdbc_url') or
+            creds.get('connection_uri') or
+            creds.get('connectionUri')
         )
-        # Only default to localhost if explicitly provided
-        if not params['host'] and default_host == 'localhost':
-            params['host'] = 'localhost'
+        if uri:
+            params['uri'] = uri
     
-    # Port variations
-    port_value = (
-        creds.get('port') or 
-        creds.get('ssl_port') or
-        creds.get('Port') or
-        default_port
-    )
-    if port_value:
-        try:
-            params['port'] = int(port_value)
-        except (ValueError, TypeError):
-            params['port'] = default_port or None
+    # Host/hostname variations (extract for fallback, but URI takes precedence)
+    if not params.get('host'):
+        # Handle hosts array (CUPS format)
+        hosts = creds.get('hosts')
+        if isinstance(hosts, list) and len(hosts) > 0:
+            params['host'] = hosts[0]
+        else:
+            # Try service_gateway host first (for PostgreSQL)
+            if isinstance(service_gateway, dict) and service_gateway.get('host'):
+                params['host'] = service_gateway.get('host')
+            else:
+                params['host'] = (
+                    creds.get('hostname') or 
+                    creds.get('host') or 
+                    creds.get('primary_host') or
+                    creds.get('hostname_or_ip') or
+                    creds.get('hostName') or
+                    creds.get('HostName') or
+                    default_host
+                )
+                if not params['host'] and default_host == 'localhost':
+                    params['host'] = 'localhost'
+    
+    # Port variations (extract for fallback, but URI takes precedence)
+    if not params.get('port'):
+        if isinstance(service_gateway, dict) and service_gateway.get('port'):
+            try:
+                params['port'] = int(service_gateway.get('port'))
+            except (ValueError, TypeError):
+                pass
+        
+        if not params.get('port'):
+            port_value = (
+                creds.get('port') or 
+                creds.get('ssl_port') or
+                creds.get('Port') or
+                default_port
+            )
+            if port_value:
+                try:
+                    params['port'] = int(port_value)
+                except (ValueError, TypeError):
+                    params['port'] = default_port or None
     
     # Username/user variations
     params['username'] = (
@@ -263,5 +235,12 @@ def get_connection_params_from_creds(creds, default_host=None, default_port=None
     params['vhost'] = creds.get('vhost') or creds.get('vHost') or creds.get('VHost') or '/'
     params['ssl'] = creds.get('ssl') or creds.get('SSL') or False
     params['ssl_ca'] = creds.get('ssl_ca') or creds.get('sslCa') or creds.get('SSL_CA')
+    
+    # Handle TLS cert from nested structure (CUPS format)
+    tls = creds.get('tls', {})
+    if isinstance(tls, dict):
+        cert = tls.get('cert', {})
+        if isinstance(cert, dict) and cert.get('ca'):
+            params['ssl_ca'] = cert.get('ca')
     
     return params

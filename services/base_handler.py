@@ -54,19 +54,20 @@ class ServiceHandler(ABC):
         creds = find_service_credentials(service_types)
         
         if creds:
-            # First check if URI is available (prioritize URI for user-provided services)
-            uri = self._extract_uri(creds)
-            if uri:
-                self._parse_uri(uri)
-                return
-            
-            # Also check if URI is in params (from get_connection_params_from_creds)
+            # Priority 1: Check if URI is in params (from get_connection_params_from_creds)
+            # This handles service_gateway.uri for PostgreSQL and top-level uri for MySQL
             params = get_connection_params_from_creds(creds, None, self.default_port)
             if params.get('uri'):
                 self._parse_uri(params['uri'])
                 return
             
-            # If no URI, use individual fields but don't default host to localhost
+            # Priority 2: Check if URI is directly in credentials
+            uri = self._extract_uri(creds)
+            if uri:
+                self._parse_uri(uri)
+                return
+            
+            # Priority 3: If no URI, use individual fields but don't default host to localhost
             try:
                 self._parse_credentials(creds)
             except ValueError as e:
@@ -151,6 +152,16 @@ class DatabaseHandler(ServiceHandler):
     
     def _extract_uri(self, creds: Dict[str, Any]) -> Optional[str]:
         """Extract database URI"""
+        # For PostgreSQL: prefer service_gateway.uri
+        # For MySQL: prefer top-level uri
+        # Check service_gateway first (for PostgreSQL)
+        service_gateway = creds.get('service_gateway', {})
+        if isinstance(service_gateway, dict) and service_gateway.get('uri'):
+            return service_gateway.get('uri')
+        if isinstance(service_gateway, dict) and service_gateway.get('jdbcUrl'):
+            return service_gateway.get('jdbcUrl')
+        
+        # Fallback to top-level URI (for MySQL or if service_gateway not available)
         return (
             creds.get('uri') or 
             creds.get('url') or 

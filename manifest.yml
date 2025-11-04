@@ -1,46 +1,66 @@
 ---
 applications:
-# PostgreSQL application
+# UI Application - Only app with routes
+- name: service-tester-ui
+  memory: 512M
+  instances: 1
+  buildpack: python_buildpack
+  command: python app.py
+  random-route: true
+  host: service-tester
+  env:
+    PYTHONUNBUFFERED: 1
+    APP_TYPE: ui
+
+# PostgreSQL application - No routes
 - name: service-tester-postgres
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
+  no-route: true
   env:
     PYTHONUNBUFFERED: 1
+    APP_TYPE: backend
   services:
     - service-tester-postgres
 
-# MySQL application
+# MySQL application - No routes
 - name: service-tester-mysql
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
+  no-route: true
   env:
     PYTHONUNBUFFERED: 1
+    APP_TYPE: backend
   services:
     - service-tester-mysql
 
-# RabbitMQ application
+# RabbitMQ application - No routes
 - name: service-tester-rabbitmq
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
+  no-route: true
   env:
     PYTHONUNBUFFERED: 1
+    APP_TYPE: backend
   services:
     - service-tester-rabbitmq
 
-# Valkey application
+# Valkey application - No routes
 - name: service-tester-valkey
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
+  no-route: true
   env:
     PYTHONUNBUFFERED: 1
+    APP_TYPE: backend
   services:
     - service-tester-valkey
 

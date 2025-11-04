@@ -22,7 +22,19 @@ class ServiceHandler(ABC):
         """
         self.default_port = default_port
         self.env_prefix = env_prefix
-        self._load_credentials(service_types)
+        self.service_types = service_types
+        self._credentials_loaded = False
+        self._credential_error = None
+        
+        # Try to load credentials, but don't fail if not available
+        # This allows handlers to be created even if credentials aren't available yet
+        try:
+            self._load_credentials(service_types)
+            self._credentials_loaded = True
+        except Exception as e:
+            # Store error to show later when connection is attempted
+            self._credential_error = str(e)
+            self._credentials_loaded = False
     
     def _load_credentials(self, service_types: list):
         """Load credentials from VCAP_SERVICES or environment variables"""
@@ -36,7 +48,7 @@ class ServiceHandler(ABC):
                 return
             
             # Also check if URI is in params (from get_connection_params_from_creds)
-            params = get_connection_params_from_creds(creds, None, self.default_port)  # Don't default to localhost
+            params = get_connection_params_from_creds(creds, None, self.default_port)
             if params.get('uri'):
                 self._parse_uri(params['uri'])
                 return
@@ -53,20 +65,29 @@ class ServiceHandler(ABC):
                     f"Error: {str(e)}"
                 )
         else:
-            # No credentials found - this means service not bound or not found in VCAP_SERVICES
-            # Try environment variables as fallback
+            # No credentials found - try environment variables as fallback
             env_host = os.environ.get(f'{self.env_prefix}_HOST')
-            if not env_host:
+            if env_host:
+                self._load_from_env()
+            else:
+                # Don't raise error here - allow handler to be created
+                # Error will be shown when connection is attempted
                 raise ValueError(
                     f"Service not found in VCAP_SERVICES and no {self.env_prefix}_HOST environment variable. "
                     f"Please bind a service or set environment variables. "
                     f"Looking for service types: {service_types}"
                 )
-            self._load_from_env()
     
     def _extract_uri(self, creds: Dict[str, Any]) -> Optional[str]:
         """Extract URI from credentials (override in subclasses)"""
-        return creds.get('uri') or creds.get('url')
+        return (
+            creds.get('uri') or 
+            creds.get('url') or 
+            creds.get('connection_string') or
+            creds.get('connectionString') or
+            creds.get('connection_uri') or
+            creds.get('connectionUri')
+        )
     
     def _parse_uri(self, uri: str):
         """Parse URI (override in subclasses for specific parsing)"""
@@ -114,8 +135,12 @@ class DatabaseHandler(ServiceHandler):
             creds.get('url') or 
             creds.get('connection_string') or
             creds.get('connectionString') or
+            creds.get('connection_uri') or
+            creds.get('connectionUri') or
             creds.get('jdbcUrl') or 
-            creds.get('jdbc_url')
+            creds.get('jdbc_url') or
+            creds.get('jdbc_uri') or
+            creds.get('jdbcUri')
         )
     
     def _parse_uri(self, uri: str):

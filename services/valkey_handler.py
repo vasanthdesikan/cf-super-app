@@ -18,6 +18,17 @@ class ValkeyHandler(CacheHandler):
     
     def _get_client(self):
         """Get or create Valkey client"""
+        # Check if credentials were loaded, if not, try to load them now
+        if not self._credentials_loaded:
+            try:
+                self._load_credentials(self.service_types)
+                self._credentials_loaded = True
+                if hasattr(self, '_credential_error'):
+                    delattr(self, '_credential_error')
+            except Exception as e:
+                error_msg = getattr(self, '_credential_error', str(e))
+                raise Exception(f"Cannot connect to Valkey: {error_msg}")
+        
         if self.client is None:
             self.client = redis.Redis(
                 host=self.host,

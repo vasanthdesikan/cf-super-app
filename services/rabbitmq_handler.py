@@ -19,6 +19,17 @@ class RabbitMQHandler(MessageQueueHandler):
     
     def _get_connection(self):
         """Get or create RabbitMQ connection"""
+        # Check if credentials were loaded, if not, try to load them now
+        if not self._credentials_loaded:
+            try:
+                self._load_credentials(self.service_types)
+                self._credentials_loaded = True
+                if hasattr(self, '_credential_error'):
+                    delattr(self, '_credential_error')
+            except Exception as e:
+                error_msg = getattr(self, '_credential_error', str(e))
+                raise Exception(f"Cannot connect to RabbitMQ: {error_msg}")
+        
         if self.connection is None or self.connection.is_closed:
             credentials = pika.PlainCredentials(self.username, self.password)
             parameters = pika.ConnectionParameters(

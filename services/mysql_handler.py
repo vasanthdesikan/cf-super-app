@@ -23,6 +23,17 @@ class MySQLHandler(DatabaseHandler):
     
     def _get_connection(self):
         """Get or create MySQL connection"""
+        # Check if credentials were loaded, if not, try to load them now
+        if not self._credentials_loaded:
+            try:
+                self._load_credentials(self.service_types)
+                self._credentials_loaded = True
+                if hasattr(self, '_credential_error'):
+                    delattr(self, '_credential_error')
+            except Exception as e:
+                error_msg = getattr(self, '_credential_error', str(e))
+                raise Exception(f"Cannot connect to MySQL: {error_msg}")
+        
         if self.connection is None or not self.connection.is_connected():
             # Note: mysql.connector doesn't support URI directly, so we use parsed values
             # But we ensure URI is checked first during credential loading

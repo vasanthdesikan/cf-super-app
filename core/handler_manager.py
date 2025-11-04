@@ -27,9 +27,18 @@ class HandlerManager:
                     self._handlers[service_name] = handler
                     if handler is None:
                         logger.warning(f"Failed to create handler for {service_name}")
+                    else:
+                        logger.info(f"Successfully initialized handler for {service_name}")
                 except Exception as e:
-                    logger.warning(f"Failed to initialize {service_name}: {e}")
-                    self._handlers[service_name] = None
+                    # Log the error but still allow handler creation - fail at connection time instead
+                    logger.warning(f"Handler initialization warning for {service_name}: {e}")
+                    # Try to create handler anyway - errors will surface at connection time
+                    try:
+                        handler = ServiceHandlerFactory.create(service_name)
+                        self._handlers[service_name] = handler
+                    except Exception as e2:
+                        logger.error(f"Failed to initialize {service_name}: {e2}")
+                        self._handlers[service_name] = None
             else:
                 self._handlers[service_name] = None
     

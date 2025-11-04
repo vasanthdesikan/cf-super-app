@@ -24,9 +24,10 @@ class MySQLHandler(DatabaseHandler):
     def _get_connection(self):
         """Get or create MySQL connection"""
         if self.connection is None or not self.connection.is_connected():
-            # Check if we have a URI stored (from credentials)
-            # Note: mysql.connector doesn't support URI directly, so we still parse
+            # Note: mysql.connector doesn't support URI directly, so we use parsed values
             # But we ensure URI is checked first during credential loading
+            if not self.host:
+                raise Exception("No connection information available. Please provide URI or hostname in service credentials.")
             self.connection = mysql.connector.connect(
                 host=self.host,
                 port=self.port,

@@ -43,7 +43,7 @@ def find_service_credentials(service_types, service_name=None):
                 # Otherwise return first service
                 return services[0].get('credentials', {})
     
-    # Strategy 2: Look for User Provisioned Services (UPS)
+    # Strategy 2: Look for User Provisioned Services (UPS/CUPS)
     if 'user-provided' in vcap:
         ups_services = vcap['user-provided']
         for service in ups_services:
@@ -57,7 +57,11 @@ def find_service_credentials(service_types, service_name=None):
                     # Clean service type for comparison (remove dots, hyphens, prefixes)
                     clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
                     tag_list = [tag.lower() for tag in tags]
-                    if clean_type in tag_list or service_type.lower() in tag_list:
+                    # Match various tag formats
+                    if (clean_type in tag_list or 
+                        service_type.lower() in tag_list or
+                        clean_type.replace('postgresql', 'postgres') in tag_list or
+                        clean_type.replace('postgres', 'postgresql') in tag_list):
                         return service.get('credentials', {})
     
     # Strategy 3: Search all services by name (if provided)
@@ -76,14 +80,16 @@ def get_connection_params_from_creds(creds, default_host=None, default_port=None
     """
     params = {}
     
-    # Host/hostname variations
+    # Host/hostname variations - only use default if explicitly provided
     params['host'] = (
         creds.get('hostname') or 
         creds.get('host') or 
         creds.get('hostname_or_ip') or
-        default_host or 
-        'localhost'
+        default_host
     )
+    # Only default to localhost if default_host was explicitly 'localhost'
+    if not params['host'] and default_host == 'localhost':
+        params['host'] = 'localhost'
     
     # Port variations
     port_value = (

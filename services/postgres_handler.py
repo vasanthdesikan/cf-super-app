@@ -24,10 +24,14 @@ class PostgresHandler(DatabaseHandler):
     def _get_connection(self):
         """Get or create PostgreSQL connection"""
         if self.connection is None or self.connection.closed:
-            # Check if we have a URI stored (from credentials)
+            # Check if we have a URI stored (from credentials) - prioritize this
             if hasattr(self, '_connection_uri') and self._connection_uri:
-                self.connection = psycopg2.connect(self._connection_uri)
-            else:
+                try:
+                    self.connection = psycopg2.connect(self._connection_uri)
+                except Exception as e:
+                    raise Exception(f"Failed to connect using URI. Error: {str(e)}")
+            elif self.host:
+                # Use individual connection parameters
                 self.connection = psycopg2.connect(
                     host=self.host,
                     port=self.port,
@@ -35,6 +39,8 @@ class PostgresHandler(DatabaseHandler):
                     user=self.username,
                     password=self.password
                 )
+            else:
+                raise Exception("No connection information available. Please provide URI or hostname in service credentials.")
             self.connection.autocommit = False
         return self.connection
     

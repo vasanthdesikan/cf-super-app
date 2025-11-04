@@ -33,13 +33,16 @@ class ServiceHandler(ABC):
             uri = self._extract_uri(creds)
             if uri:
                 self._parse_uri(uri)
-            else:
-                # Also check if URI is in params (from get_connection_params_from_creds)
-                params = get_connection_params_from_creds(creds, 'localhost', self.default_port)
-                if params.get('uri'):
-                    self._parse_uri(params['uri'])
-                else:
-                    self._parse_credentials(creds)
+                return
+            
+            # Also check if URI is in params (from get_connection_params_from_creds)
+            params = get_connection_params_from_creds(creds, None, self.default_port)  # Don't default to localhost
+            if params.get('uri'):
+                self._parse_uri(params['uri'])
+                return
+            
+            # If no URI, use individual fields but don't default host to localhost
+            self._parse_credentials(creds)
         else:
             self._load_from_env()
     
@@ -100,12 +103,17 @@ class DatabaseHandler(ServiceHandler):
     
     def _parse_credentials(self, creds: Dict[str, Any]):
         """Parse database credentials"""
-        params = get_connection_params_from_creds(creds, 'localhost', self.default_port)
-        self.host = params['host']
+        # Don't default host to localhost - only use if explicitly provided
+        params = get_connection_params_from_creds(creds, None, self.default_port)
+        self.host = params.get('host') if params.get('host') else None
         self.port = params.get('port') or self.default_port
         self.username = params.get('username')
         self.password = params.get('password') or ''
         self.database = params.get('database')
+        
+        # If no host found, raise error to prevent localhost fallback
+        if not self.host:
+            raise ValueError(f"No connection information found in credentials. Expected URI or hostname. Found keys: {list(creds.keys())}")
     
     def _load_from_env(self):
         """Load database config from environment"""

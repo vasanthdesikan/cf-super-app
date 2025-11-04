@@ -121,8 +121,15 @@ def get_connection_params_from_creds(creds, default_host=None, default_port=None
         None
     )
     
-    # URI variations (parse if available)
-    uri = creds.get('uri') or creds.get('url') or creds.get('connection_string')
+    # URI variations (parse if available) - prioritize these for user-provided services
+    uri = (
+        creds.get('uri') or 
+        creds.get('url') or 
+        creds.get('connection_string') or
+        creds.get('connectionString') or
+        creds.get('jdbcUrl') or
+        creds.get('jdbc_url')
+    )
     if uri:
         params['uri'] = uri
     

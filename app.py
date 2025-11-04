@@ -49,6 +49,14 @@ def test_service(service_name):
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error testing {service_name}: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': f'Internal error: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/list/<service_name>', methods=['GET'])
 def list_service_resources(service_name):
@@ -91,6 +99,14 @@ def list_service_resources(service_name):
             'success': False,
             'service': service_name,
             'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error listing {service_name} resources: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': f'Internal error: {str(e)}',
             'timestamp': datetime.now().isoformat()
         }), 500
 

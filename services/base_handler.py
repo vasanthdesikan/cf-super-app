@@ -29,11 +29,17 @@ class ServiceHandler(ABC):
         creds = find_service_credentials(service_types)
         
         if creds:
+            # First check if URI is available (prioritize URI for user-provided services)
             uri = self._extract_uri(creds)
             if uri:
                 self._parse_uri(uri)
             else:
-                self._parse_credentials(creds)
+                # Also check if URI is in params (from get_connection_params_from_creds)
+                params = get_connection_params_from_creds(creds, 'localhost', self.default_port)
+                if params.get('uri'):
+                    self._parse_uri(params['uri'])
+                else:
+                    self._parse_credentials(creds)
         else:
             self._load_from_env()
     
@@ -70,11 +76,21 @@ class DatabaseHandler(ServiceHandler):
     
     def _extract_uri(self, creds: Dict[str, Any]) -> Optional[str]:
         """Extract database URI"""
-        return creds.get('uri') or creds.get('url') or creds.get('jdbcUrl') or creds.get('jdbc_url')
+        return (
+            creds.get('uri') or 
+            creds.get('url') or 
+            creds.get('connection_string') or
+            creds.get('connectionString') or
+            creds.get('jdbcUrl') or 
+            creds.get('jdbc_url')
+        )
     
     def _parse_uri(self, uri: str):
         """Parse database URI"""
         from urllib.parse import unquote
+        # Store original URI for direct connection
+        self._connection_uri = uri
+        # Also parse for individual fields as fallback
         parsed = urlparse(uri.replace('mysql2://', 'mysql://').replace('postgres://', 'postgresql://'))
         self.host = parsed.hostname or 'localhost'
         self.port = parsed.port or self.default_port

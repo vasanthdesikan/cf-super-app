@@ -489,7 +489,18 @@
                 // For MySQL/PostgreSQL, first get table list, then auto-load first table
                 if (serviceId === 'mysql' || serviceId === 'postgres') {
                     const response = await fetch(url);
-                    const result = await response.json();
+                    let result;
+                    try {
+                        result = await response.json();
+                    } catch (e) {
+                        const text = await response.text();
+                        resourcesDiv.innerHTML = `
+                            <div class="resources-error">
+                                <strong>Error:</strong> Failed to parse response. ${text.substring(0, 200)}
+                            </div>
+                        `;
+                        return;
+                    }
                     
                     if (response.ok && result.success) {
                         // If we have tables, automatically load the first table's data
@@ -512,7 +523,18 @@
                     }
                     
                     const response = await fetch(url);
-                    const result = await response.json();
+                    let result;
+                    try {
+                        result = await response.json();
+                    } catch (e) {
+                        const text = await response.text();
+                        resourcesDiv.innerHTML = `
+                            <div class="resources-error">
+                                <strong>Error:</strong> Failed to parse response. ${text.substring(0, 200)}
+                            </div>
+                        `;
+                        return;
+                    }
                     
                     if (response.ok && result.success) {
                         displayResources(serviceId, result.data);
@@ -656,7 +678,14 @@
             resourcesDiv.innerHTML = '<div class="resources-loading">Loading table data...</div>';
             
             fetch(`/api/list/${serviceId}?table=${encodeURIComponent(tableName)}&limit=50&offset=${offset}`)
-                .then(response => response.json())
+                .then(async response => {
+                    try {
+                        return await response.json();
+                    } catch (e) {
+                        const text = await response.text();
+                        throw new Error(`Failed to parse response: ${text.substring(0, 200)}`);
+                    }
+                })
                 .then(result => {
                     if (result.success) {
                         displayResources(serviceId, result.data);
@@ -848,7 +877,19 @@
                     body: JSON.stringify(data)
                 });
                 
-                const result = await response.json();
+                let result;
+                try {
+                    result = await response.json();
+                } catch (e) {
+                    const text = await response.text();
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <h3>✗ Error</h3>
+                        <p>Failed to parse server response. The server may have returned an error page instead of JSON.</p>
+                        <pre>${escapeHtml(text.substring(0, 500))}</pre>
+                    `;
+                    return;
+                }
                 
                 if (response.ok && result.success) {
                     resultDiv.className = 'result success';

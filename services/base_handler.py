@@ -26,15 +26,28 @@ class ServiceHandler(ABC):
         self._credentials_loaded = False
         self._credential_error = None
         
-        # Try to load credentials, but don't fail if not available
+        # Initialize with None values - will be set when credentials are loaded
+        self.host = None
+        self.port = default_port
+        self.username = None
+        self.password = None
+        
+        # Try to load credentials, but NEVER fail if not available
         # This allows handlers to be created even if credentials aren't available yet
+        # Errors will be shown when connection is actually attempted
         try:
             self._load_credentials(service_types)
             self._credentials_loaded = True
+            self._credential_error = None
         except Exception as e:
             # Store error to show later when connection is attempted
+            # NEVER raise - always allow handler to be created
             self._credential_error = str(e)
             self._credentials_loaded = False
+            # Log but don't fail
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Credentials not loaded for {env_prefix}: {str(e)}")
     
     def _load_credentials(self, service_types: list):
         """Load credentials from VCAP_SERVICES or environment variables"""
@@ -70,8 +83,7 @@ class ServiceHandler(ABC):
             if env_host:
                 self._load_from_env()
             else:
-                # Don't raise error here - allow handler to be created
-                # Error will be shown when connection is attempted
+                # Raise error - this will be caught and stored for later display
                 raise ValueError(
                     f"Service not found in VCAP_SERVICES and no {self.env_prefix}_HOST environment variable. "
                     f"Please bind a service or set environment variables. "
@@ -128,6 +140,15 @@ class ServiceHandler(ABC):
 class DatabaseHandler(ServiceHandler):
     """Base class for database handlers (MySQL, PostgreSQL)"""
     
+    def __init__(self, service_types: list, default_port: int, env_prefix: str):
+        """Initialize database handler"""
+        super().__init__(service_types, default_port, env_prefix)
+        # Initialize database-specific attributes (will be set from credentials if available)
+        if not hasattr(self, 'database') or self.database is None:
+            self.database = None
+        if not hasattr(self, 'username') or self.username is None:
+            self.username = None
+    
     def _extract_uri(self, creds: Dict[str, Any]) -> Optional[str]:
         """Extract database URI"""
         return (
@@ -164,9 +185,9 @@ class DatabaseHandler(ServiceHandler):
         params = get_connection_params_from_creds(creds, None, self.default_port)
         self.host = params.get('host') if params.get('host') else None
         self.port = params.get('port') or self.default_port
-        self.username = params.get('username')
+        self.username = params.get('username') or self.username
         self.password = params.get('password') or ''
-        self.database = params.get('database')
+        self.database = params.get('database') or self.database
         
         # If no host found, raise error to prevent localhost fallback
         if not self.host:
@@ -175,9 +196,10 @@ class DatabaseHandler(ServiceHandler):
     def _load_from_env(self):
         """Load database config from environment"""
         super()._load_from_env()
-        self.username = os.environ.get(f'{self.env_prefix}_USER')
-        self.password = os.environ.get(f'{self.env_prefix}_PASSWORD', '')
-        self.database = os.environ.get(f'{self.env_prefix}_DATABASE')
+        # Preserve existing values if env vars not set
+        self.username = os.environ.get(f'{self.env_prefix}_USER') or self.username
+        self.password = os.environ.get(f'{self.env_prefix}_PASSWORD', '') or self.password or ''
+        self.database = os.environ.get(f'{self.env_prefix}_DATABASE') or self.database
 
 
 class CacheHandler(ServiceHandler):

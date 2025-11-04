@@ -15,9 +15,10 @@ class MySQLHandler(DatabaseHandler):
             default_port=3306,
             env_prefix='MYSQL'
         )
-        if not self.database:
+        # Initialize database and username even if credentials not loaded
+        if not hasattr(self, 'database') or not self.database:
             self.database = 'testdb'
-        if not self.username:
+        if not hasattr(self, 'username') or not self.username:
             self.username = 'root'
         self.connection = None
     

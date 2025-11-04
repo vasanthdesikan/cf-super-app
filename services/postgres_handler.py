@@ -15,9 +15,10 @@ class PostgresHandler(DatabaseHandler):
             default_port=5432,
             env_prefix='POSTGRES'
         )
-        if not self.database:
+        # Initialize database and username even if credentials not loaded
+        if not hasattr(self, 'database') or not self.database:
             self.database = 'postgres'
-        if not self.username:
+        if not hasattr(self, 'username') or not self.username:
             self.username = 'postgres'
         self.connection = None
     

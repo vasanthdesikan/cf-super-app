@@ -41,10 +41,16 @@ def find_service_credentials(service_types, service_name=None):
                         if svc.get('name') == service_name:
                             creds = svc.get('credentials', {})
                             if creds:
+                                # Handle nested credentials (service-key format)
+                                if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                                    creds = creds.get('credentials', {})
                                 return creds
                 # Otherwise return first service
                 creds = services[0].get('credentials', {})
                 if creds:
+                    # Handle nested credentials (service-key format)
+                    if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                        creds = creds.get('credentials', {})
                     return creds
     
     # Strategy 2: Look for User Provisioned Services (UPS/CUPS)
@@ -57,6 +63,9 @@ def find_service_credentials(service_types, service_name=None):
                 if service.get('name') == service_name:
                     creds = service.get('credentials', {})
                     if creds:
+                        # Handle nested credentials (service-key format)
+                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                            creds = creds.get('credentials', {})
                         return creds
         
         # Then try to match by tags
@@ -78,6 +87,9 @@ def find_service_credentials(service_types, service_name=None):
                     'queue' in tag_list and clean_type in ['rabbitmq']):
                     creds = service.get('credentials', {})
                     if creds:
+                        # Handle nested credentials (service-key format)
+                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                            creds = creds.get('credentials', {})
                         return creds
         
         # Strategy 2b: Match by service name patterns (if no tags)
@@ -90,6 +102,9 @@ def find_service_credentials(service_types, service_name=None):
                 if clean_type in service_name_check or service_type.lower() in service_name_check:
                     creds = service.get('credentials', {})
                     if creds:
+                        # Handle nested credentials (service-key format)
+                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                            creds = creds.get('credentials', {})
                         return creds
     
     # Strategy 3: Search all services by name (if provided)
@@ -99,6 +114,9 @@ def find_service_credentials(service_types, service_name=None):
                 if service.get('name') == service_name:
                     creds = service.get('credentials', {})
                     if creds:
+                        # Handle nested credentials (service-key format)
+                        if isinstance(creds, dict) and 'credentials' in creds and len(creds) == 1:
+                            creds = creds.get('credentials', {})
                         return creds
     
     # Strategy 4: Match by credential patterns (most aggressive - works even without tags)
@@ -109,6 +127,11 @@ def find_service_credentials(service_types, service_name=None):
             creds = service.get('credentials', {})
             if not creds:
                 continue
+            # Handle nested credentials (service-key format)
+            if isinstance(creds, dict) and 'credentials' in creds:
+                # If credentials only has 'credentials' key, it's likely nested
+                if len(creds) == 1 or all(k == 'credentials' for k in creds.keys() if k != 'credentials'):
+                    creds = creds.get('credentials', {})
             
             # Check if credentials have fields that match service type
             for service_type in service_types:
@@ -146,6 +169,21 @@ def get_connection_params_from_creds(creds, default_host=None, default_port=None
     Extract connection parameters from credentials dictionary.
     Handles various credential formats including service-key formats.
     """
+    if not creds:
+        return {}
+    
+    # Handle nested credentials (service-key format: {'credentials': {...}})
+    if isinstance(creds, dict):
+        # If credentials only has 'credentials' key, unwrap it
+        if 'credentials' in creds and (len(creds) == 1 or all(k == 'credentials' for k in creds.keys())):
+            creds = creds.get('credentials', {})
+        # Also check if it's a nested structure with other metadata
+        elif 'credentials' in creds and isinstance(creds.get('credentials'), dict):
+            # Prefer nested credentials if they exist
+            nested_creds = creds.get('credentials', {})
+            if nested_creds and len(nested_creds) > 0:
+                creds = nested_creds
+    
     if not creds:
         return {}
     

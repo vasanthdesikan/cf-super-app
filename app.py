@@ -1,187 +1,171 @@
 #!/usr/bin/env python3
-"""
-Cloud Foundry App for Testing Backend Services
-Supports: RabbitMQ, Valkey, MySQL, PostgreSQL
-"""
+"""Cloud Foundry App for Testing Backend Services"""
 
 import os
-import requests
+import json
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime
 
-from core.config import config
-from core.handler_manager import HandlerManager
-from core.exceptions import ServiceNotFoundError, ServiceOperationError
-
 app = Flask(__name__)
 
-# Check if this is UI app or backend app
+# App configuration
 APP_TYPE = os.environ.get('APP_TYPE', 'backend')
 IS_UI_APP = APP_TYPE == 'ui'
 
-# Initialize handler manager (singleton pattern) - only for backend apps
-handler_manager = HandlerManager() if not IS_UI_APP else None
-
-# Map service names to backend app names
-BACKEND_APP_MAP = {
+# Backend app name mapping
+BACKEND_APPS = {
     'postgres': 'service-tester-postgres',
     'mysql': 'service-tester-mysql',
     'rabbitmq': 'service-tester-rabbitmq',
     'valkey': 'service-tester-valkey'
 }
 
+# Cache for domain extraction
+_DOMAIN_CACHE = None
+
+def _get_domain():
+    """Get CF domain from VCAP_APPLICATION (cached)"""
+    global _DOMAIN_CACHE
+    if _DOMAIN_CACHE is not None:
+        return _DOMAIN_CACHE
+    
+    vcap = os.environ.get('VCAP_APPLICATION', '{}')
+    if vcap and vcap != '{}':
+        try:
+            app_info = json.loads(vcap)
+            uris = app_info.get('uris', [])
+            if uris and '.' in uris[0]:
+                _DOMAIN_CACHE = '.'.join(uris[0].split('.')[1:])
+                return _DOMAIN_CACHE
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
+    _DOMAIN_CACHE = ''
+    return ''
+
 def get_backend_url(service_name):
-    """Get internal URL for backend app"""
-    backend_app = BACKEND_APP_MAP.get(service_name)
+    """Get backend app URL"""
+    backend_app = BACKEND_APPS.get(service_name)
     if not backend_app:
         return None
-    # Use internal Cloud Foundry route
-    return f'http://{backend_app}.internal'
+    domain = _get_domain()
+    return f'http://{backend_app}.{domain}' if domain else f'http://{backend_app}'
+
+# Lazy load handlers only for backend apps
+if not IS_UI_APP:
+    from core.handler_manager import HandlerManager
+    from core.exceptions import ServiceNotFoundError, ServiceOperationError
+    handler_manager = HandlerManager()
+else:
+    handler_manager = None
+    import requests
 
 @app.route('/')
 def index():
     """Main page with tabbed UI"""
     if IS_UI_APP:
-        # UI app: show UI with all enabled services
+        from core.config import config
         return render_template('index.html', services=config.get_enabled_services())
-    else:
-        # Backend app: redirect or show error
-        return jsonify({'error': 'This is a backend service. Access via UI app.'}), 403
+    return jsonify({'error': 'This is a backend service. Access via UI app.'}), 403
 
 @app.route('/api/services')
 def get_services():
     """API endpoint to get enabled services"""
+    from core.config import config
     return jsonify(config.get_enabled_services())
+
+def _proxy_request(method, service_name, url_suffix='', **kwargs):
+    """Proxy request to backend app"""
+    backend_url = get_backend_url(service_name)
+    if not backend_url:
+        return jsonify({'success': False, 'error': f'Unknown service: {service_name}'}), 404
+    
+    try:
+        url = f'{backend_url}/api/{url_suffix}{service_name}'
+        if method == 'POST':
+            response = requests.post(url, json=kwargs.get('json', {}), 
+                                    headers={'Content-Type': 'application/json'}, timeout=30)
+        else:
+            response = requests.get(url, params=kwargs.get('params', {}), timeout=30)
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Error proxying to {service_name}: {e}")
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': f'Backend service unavailable: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 503
+
+def _handle_backend_request(service_name, action='test', **kwargs):
+    """Handle request in backend app"""
+    try:
+        handler = handler_manager.get_handler(service_name)
+        if action == 'test':
+            result = handler.test_transaction(kwargs.get('data', {}))
+        elif action == 'list':
+            if service_name in ['mysql', 'postgres']:
+                result = handler.get_table_data(kwargs['table'], **kwargs) if kwargs.get('table') else handler.list_tables()
+            elif service_name == 'rabbitmq':
+                result = handler.list_queues()
+            elif service_name == 'valkey':
+                result = handler.list_keys(**kwargs)
+            else:
+                return jsonify({'success': False, 'error': 'Unsupported service'}), 400
+        else:
+            return jsonify({'success': False, 'error': 'Invalid action'}), 400
+        
+        return jsonify({
+            'success': True,
+            'service': service_name,
+            'timestamp': datetime.now().isoformat(),
+            'data': result
+        })
+    except ServiceNotFoundError as e:
+        return jsonify({'success': False, 'error': str(e)}), 404
+    except ServiceOperationError as e:
+        app.logger.error(f"Error in {service_name}: {e}")
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in {service_name}: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'service': service_name,
+            'error': f'Internal error: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/test/<service_name>', methods=['POST'])
 def test_service(service_name):
     """Test a specific service transaction"""
     if IS_UI_APP:
-        # UI app: proxy to backend app
-        backend_url = get_backend_url(service_name)
-        if not backend_url:
-            return jsonify({'success': False, 'error': f'Unknown service: {service_name}'}), 404
-        
-        try:
-            response = requests.post(
-                f'{backend_url}/api/test/{service_name}',
-                json=request.get_json() or {},
-                headers={'Content-Type': 'application/json'},
-                timeout=30
-            )
-            return jsonify(response.json()), response.status_code
-        except requests.exceptions.RequestException as e:
-            app.logger.error(f"Error proxying to backend {service_name}: {e}")
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': f'Backend service unavailable: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-    else:
-        # Backend app: handle the request
-        try:
-            handler = handler_manager.get_handler(service_name)
-            result = handler.test_transaction(request.get_json() or {})
-            return jsonify({
-                'success': True,
-                'service': service_name,
-                'timestamp': datetime.now().isoformat(),
-                'data': result
-            })
-        except ServiceNotFoundError as e:
-            return jsonify({'success': False, 'error': str(e)}), 404
-        except ServiceOperationError as e:
-            app.logger.error(f"Error testing {service_name}: {e}")
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }), 500
-        except Exception as e:
-            app.logger.error(f"Unexpected error testing {service_name}: {e}", exc_info=True)
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': f'Internal error: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }), 500
+        return _proxy_request('POST', service_name, 'test/', json=request.get_json() or {})
+    return _handle_backend_request(service_name, 'test', data=request.get_json() or {})
 
 @app.route('/api/list/<service_name>', methods=['GET'])
 def list_service_resources(service_name):
-    """List resources for a specific service (tables, queues, keys)"""
+    """List resources for a specific service"""
     if IS_UI_APP:
-        # UI app: proxy to backend app
-        backend_url = get_backend_url(service_name)
-        if not backend_url:
-            return jsonify({'success': False, 'error': f'Unknown service: {service_name}'}), 404
-        
-        try:
-            response = requests.get(
-                f'{backend_url}/api/list/{service_name}',
-                params=request.args,
-                timeout=30
-            )
-            return jsonify(response.json()), response.status_code
-        except requests.exceptions.RequestException as e:
-            app.logger.error(f"Error proxying to backend {service_name}: {e}")
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': f'Backend service unavailable: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-    else:
-        # Backend app: handle the request
-        try:
-            handler = handler_manager.get_handler(service_name)
-            
-            # Strategy pattern: Route to appropriate method based on service type
-            if service_name in ['mysql', 'postgres']:
-                table_name = request.args.get('table')
-                if table_name:
-                    result = handler.get_table_data(
-                        table_name,
-                        limit=int(request.args.get('limit', 100)),
-                        offset=int(request.args.get('offset', 0))
-                    )
-                else:
-                    result = handler.list_tables()
-            elif service_name == 'rabbitmq':
-                result = handler.list_queues()
-            elif service_name == 'valkey':
-                result = handler.list_keys(
-                    pattern=request.args.get('pattern', '*'),
-                    limit=int(request.args.get('limit', 100))
-                )
-            else:
-                return jsonify({'success': False, 'error': 'Unsupported service'}), 400
-            
-            return jsonify({
-                'success': True,
-                'service': service_name,
-                'timestamp': datetime.now().isoformat(),
-                'data': result
+        return _proxy_request('GET', service_name, 'list/', params=request.args)
+    
+    kwargs = {'table': request.args.get('table')}
+    if service_name in ['mysql', 'postgres']:
+        if kwargs['table']:
+            kwargs.update({
+                'limit': int(request.args.get('limit', 100)),
+                'offset': int(request.args.get('offset', 0))
             })
-        except ServiceNotFoundError as e:
-            return jsonify({'success': False, 'error': str(e)}), 404
-        except ServiceOperationError as e:
-            app.logger.error(f"Error listing {service_name} resources: {e}")
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }), 500
-        except Exception as e:
-            app.logger.error(f"Unexpected error listing {service_name} resources: {e}", exc_info=True)
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'error': f'Internal error: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }), 500
+    elif service_name == 'valkey':
+        kwargs.update({
+            'pattern': request.args.get('pattern', '*'),
+            'limit': int(request.args.get('limit', 100))
+        })
+    
+    return _handle_backend_request(service_name, 'list', **kwargs)
 
 @app.route('/api/health')
 def health():

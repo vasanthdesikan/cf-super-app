@@ -1,6 +1,9 @@
 ---
+# Parallel builds can be enabled by pushing apps separately or using CF CLI with --strategy flag
+# Example: cf push --strategy rolling
+
 applications:
-# UI Application - Only app with routes
+# UI Application - Only app with public routes
 - name: service-tester-ui
   memory: 512M
   instances: 1
@@ -12,52 +15,52 @@ applications:
     PYTHONUNBUFFERED: 1
     APP_TYPE: ui
 
-# PostgreSQL application - No routes
+# PostgreSQL application - Has route for internal communication
 - name: service-tester-postgres
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  no-route: true
+  host: service-tester-postgres
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
   services:
     - service-tester-postgres
 
-# MySQL application - No routes
+# MySQL application - Has route for internal communication
 - name: service-tester-mysql
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  no-route: true
+  host: service-tester-mysql
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
   services:
     - service-tester-mysql
 
-# RabbitMQ application - No routes
+# RabbitMQ application - Has route for internal communication
 - name: service-tester-rabbitmq
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  no-route: true
+  host: service-tester-rabbitmq
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
   services:
     - service-tester-rabbitmq
 
-# Valkey application - No routes
+# Valkey application - Has route for internal communication
 - name: service-tester-valkey
   memory: 512M
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  no-route: true
+  host: service-tester-valkey
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend

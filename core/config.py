@@ -1,30 +1,26 @@
-"""Configuration Management Pattern"""
+"""Configuration Management"""
 
 import os
 import yaml
 from typing import Dict, Any
-from functools import lru_cache
 
 
 class ConfigManager:
-    """Singleton pattern for configuration management"""
+    """Singleton configuration manager"""
     _instance = None
     _config = None
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(ConfigManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
     
     @property
     def services_config(self) -> Dict[str, Any]:
-        """Get services configuration"""
+        """Get services configuration (cached)"""
         if self._config is None:
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                'services-config.yml'
-            )
-            with open(config_path, 'r') as f:
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'services-config.yml')
+            with open(path, 'r') as f:
                 self._config = yaml.safe_load(f)
         return self._config.get('services', {})
     
@@ -43,41 +39,26 @@ class ConfigManager:
     
     def is_service_enabled(self, service_name: str) -> bool:
         """Check if a service is enabled"""
-        # Check if service is enabled in config
         if not self.services_config.get(service_name, {}).get('enabled', False):
             return False
         
-        # If we're in Cloud Foundry, check if this app handles this service
-        # Each app instance only handles its own service type
-        vcap_app = os.environ.get('VCAP_APPLICATION', '{}')
-        if vcap_app and vcap_app != '{}':
+        # In CF: only enable service matching this app
+        vcap = os.environ.get('VCAP_APPLICATION', '{}')
+        if vcap and vcap != '{}':
             try:
                 import json
-                app_info = json.loads(vcap_app)
-                app_name = app_info.get('application_name', '')
-                
-                # Map app names to service types
-                app_service_map = {
+                app_name = json.loads(vcap).get('application_name', '')
+                app_service = {
                     'service-tester-postgres': 'postgres',
                     'service-tester-mysql': 'mysql',
                     'service-tester-rabbitmq': 'rabbitmq',
                     'service-tester-valkey': 'valkey'
-                }
-                
-                # Get the service this app should handle
-                app_service = app_service_map.get(app_name)
-                
-                # Only enable this service if it matches the app's service
-                if app_service and app_service == service_name:
-                    return True
-                elif app_service:
-                    # This app handles a different service, disable this one
-                    return False
-                # If app name not in map, allow all services (for local development)
+                }.get(app_name)
+                if app_service:
+                    return app_service == service_name
             except (json.JSONDecodeError, KeyError):
                 pass
         
-        # Default: return config value (for local development)
         return self.services_config.get(service_name, {}).get('enabled', False)
 
 

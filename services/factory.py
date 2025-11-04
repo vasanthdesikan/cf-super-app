@@ -51,27 +51,16 @@ class ServiceHandlerFactory:
         try:
             module = importlib.import_module(config['module'])
             handler_class = getattr(module, config['class'])
-            # Create handler - it should handle credential loading errors gracefully
-            handler = handler_class()
-            return handler
-        except ImportError as e:
-            # Import errors are real problems
+            return handler_class()
+        except (ImportError, AttributeError):
             return None
-        except AttributeError as e:
-            # Attribute errors are real problems
-            return None
-        except Exception as e:
-            # For other exceptions (like credential errors), still create the handler
-            # The handler's __init__ should catch these and store them
-            # But if it doesn't, log and try to create anyway
+        except Exception:
+            # Retry once for credential loading errors
             try:
                 module = importlib.import_module(config['module'])
                 handler_class = getattr(module, config['class'])
-                # Force creation - handler should handle errors internally
-                handler = handler_class()
-                return handler
-            except Exception as e2:
-                # If we still can't create, it's a real problem
+                return handler_class()
+            except Exception:
                 return None
     
     @classmethod

@@ -19,20 +19,15 @@ class HandlerManager:
         self._initialize_handlers()
     
     def _initialize_handlers(self):
-        """Initialize all enabled service handlers"""
+        """Initialize enabled service handlers"""
         for service_name in ServiceHandlerFactory.get_registered_services():
             if config.is_service_enabled(service_name):
                 handler = ServiceHandlerFactory.create(service_name)
-                if handler is None:
-                    logger.error(f"Failed to create handler for {service_name} - handler factory returned None")
-                    self._handlers[service_name] = None
-                else:
-                    self._handlers[service_name] = handler
-                    # Check if credentials were loaded
-                    if hasattr(handler, '_credentials_loaded') and not handler._credentials_loaded:
-                        logger.warning(f"Handler for {service_name} created but credentials not loaded. Error: {getattr(handler, '_credential_error', 'Unknown')}")
-                    else:
-                        logger.info(f"Successfully initialized handler for {service_name}")
+                self._handlers[service_name] = handler
+                if handler and hasattr(handler, '_credentials_loaded') and not handler._credentials_loaded:
+                    logger.warning(f"{service_name} handler created but credentials not loaded")
+                elif handler:
+                    logger.info(f"Initialized {service_name} handler")
             else:
                 self._handlers[service_name] = None
     

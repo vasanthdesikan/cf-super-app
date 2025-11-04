@@ -175,6 +175,14 @@ class DatabaseHandler(ServiceHandler):
             raise ValueError(f"Database URI does not contain a hostname: {uri}")
         self.host = parsed.hostname
         self.port = parsed.port or self.default_port
+        # Initialize attributes if they don't exist
+        if not hasattr(self, 'username'):
+            self.username = None
+        if not hasattr(self, 'password'):
+            self.password = None
+        if not hasattr(self, 'database'):
+            self.database = None
+        # Set from URI
         self.username = unquote(parsed.username) if parsed.username else None
         self.password = unquote(parsed.password) if parsed.password else ''
         self.database = parsed.path.lstrip('/') if parsed.path else None
@@ -185,6 +193,14 @@ class DatabaseHandler(ServiceHandler):
         params = get_connection_params_from_creds(creds, None, self.default_port)
         self.host = params.get('host') if params.get('host') else None
         self.port = params.get('port') or self.default_port
+        # Initialize attributes if they don't exist
+        if not hasattr(self, 'username'):
+            self.username = None
+        if not hasattr(self, 'password'):
+            self.password = None
+        if not hasattr(self, 'database'):
+            self.database = None
+        # Set from params if available, otherwise keep existing value
         self.username = params.get('username') or self.username
         self.password = params.get('password') or ''
         self.database = params.get('database') or self.database

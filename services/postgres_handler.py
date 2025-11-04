@@ -24,6 +24,12 @@ class PostgresHandler(DatabaseHandler):
     
     def _get_connection(self):
         """Get or create PostgreSQL connection"""
+        # Ensure database and username are initialized
+        if not hasattr(self, 'database') or self.database is None:
+            self.database = 'postgres'
+        if not hasattr(self, 'username') or self.username is None:
+            self.username = 'postgres'
+        
         # Check if credentials were loaded, if not, try to load them now
         if not self._credentials_loaded:
             try:
@@ -34,6 +40,12 @@ class PostgresHandler(DatabaseHandler):
             except Exception as e:
                 error_msg = getattr(self, '_credential_error', str(e))
                 raise Exception(f"Cannot connect to PostgreSQL: {error_msg}")
+        
+        # Ensure database and username are set after credential loading
+        if not self.database:
+            self.database = 'postgres'
+        if not self.username:
+            self.username = 'postgres'
         
         if self.connection is None or self.connection.closed:
             # Check if we have a URI stored (from credentials) - prioritize this

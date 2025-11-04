@@ -50,33 +50,47 @@ def find_service_credentials(service_types, service_name=None):
     # Strategy 2: Look for User Provisioned Services (UPS/CUPS)
     if 'user-provided' in vcap:
         ups_services = vcap['user-provided']
+        
+        # First, try to match by service name (if provided)
+        if service_name:
+            for service in ups_services:
+                if service.get('name') == service_name:
+                    creds = service.get('credentials', {})
+                    if creds:
+                        return creds
+        
+        # Then try to match by tags
         for service in ups_services:
-            # Match by service name (if provided)
-            if service_name and service.get('name') == service_name:
-                creds = service.get('credentials', {})
-                if creds:
-                    return creds
+            tags = service.get('tags', [])
+            tag_list = [tag.lower() for tag in tags]
             
-            # Match by tags (common convention: service type in tags)
-            if not service_name:
-                tags = service.get('tags', [])
-                tag_list = [tag.lower() for tag in tags]
+            for service_type in service_types:
+                # Clean service type for comparison
+                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
                 
-                for service_type in service_types:
-                    # Clean service type for comparison
-                    clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
-                    
-                    # Match various tag formats
-                    if (clean_type in tag_list or 
-                        service_type.lower() in tag_list or
-                        clean_type.replace('postgresql', 'postgres') in tag_list or
-                        clean_type.replace('postgres', 'postgresql') in tag_list or
-                        'database' in tag_list and clean_type in ['mysql', 'postgres', 'postgresql'] or
-                        'cache' in tag_list and clean_type in ['redis', 'valkey'] or
-                        'queue' in tag_list and clean_type in ['rabbitmq']):
-                        creds = service.get('credentials', {})
-                        if creds:
-                            return creds
+                # Match various tag formats
+                if (clean_type in tag_list or 
+                    service_type.lower() in tag_list or
+                    clean_type.replace('postgresql', 'postgres') in tag_list or
+                    clean_type.replace('postgres', 'postgresql') in tag_list or
+                    'database' in tag_list and clean_type in ['mysql', 'postgres', 'postgresql'] or
+                    'cache' in tag_list and clean_type in ['redis', 'valkey'] or
+                    'queue' in tag_list and clean_type in ['rabbitmq']):
+                    creds = service.get('credentials', {})
+                    if creds:
+                        return creds
+        
+        # Strategy 2b: Match by service name patterns (if no tags)
+        # Check if service name contains the service type
+        for service in ups_services:
+            service_name_check = service.get('name', '').lower()
+            for service_type in service_types:
+                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
+                # Check if service name contains the service type
+                if clean_type in service_name_check or service_type.lower() in service_name_check:
+                    creds = service.get('credentials', {})
+                    if creds:
+                        return creds
     
     # Strategy 3: Search all services by name (if provided)
     if service_name:
@@ -87,30 +101,43 @@ def find_service_credentials(service_types, service_name=None):
                     if creds:
                         return creds
     
-    # Strategy 4: If no service_name and multiple UPS, try to match any UPS with matching credentials
+    # Strategy 4: Match by credential patterns (most aggressive - works even without tags)
     # This handles cases where service might be bound but not tagged properly
-    if 'user-provided' in vcap and not service_name:
+    if 'user-provided' in vcap:
         ups_services = vcap['user-provided']
         for service in ups_services:
             creds = service.get('credentials', {})
-            if creds:
-                # Check if credentials have fields that match service type
-                for service_type in service_types:
-                    # Check for common credential patterns
-                    if service_type in ['mysql', 'postgres', 'postgresql']:
-                        # Database services should have hostname/host and database/name
-                        if (creds.get('hostname') or creds.get('host')) and \
-                           (creds.get('database') or creds.get('name') or creds.get('db')):
-                            return creds
-                    elif service_type in ['rabbitmq']:
-                        # RabbitMQ should have hostname/host and vhost
-                        if (creds.get('hostname') or creds.get('host')) and \
-                           (creds.get('vhost') or creds.get('uri') or creds.get('url')):
-                            return creds
-                    elif service_type in ['redis', 'valkey']:
-                        # Redis/Valkey should have hostname/host
-                        if creds.get('hostname') or creds.get('host') or creds.get('uri') or creds.get('url'):
-                            return creds
+            if not creds:
+                continue
+            
+            # Check if credentials have fields that match service type
+            for service_type in service_types:
+                clean_type = service_type.replace('p.', '').replace('p-', '').replace('.', '-').lower()
+                
+                # Check for common credential patterns
+                if clean_type in ['mysql', 'postgres', 'postgresql']:
+                    # Database services should have hostname/host and database/name
+                    # OR have a URI
+                    has_host = creds.get('hostname') or creds.get('host')
+                    has_db = creds.get('database') or creds.get('name') or creds.get('db')
+                    has_uri = creds.get('uri') or creds.get('url') or creds.get('connection_string') or creds.get('connectionString')
+                    
+                    if has_uri or (has_host and has_db):
+                        return creds
+                elif clean_type in ['rabbitmq']:
+                    # RabbitMQ should have hostname/host and vhost OR URI
+                    has_host = creds.get('hostname') or creds.get('host')
+                    has_vhost = creds.get('vhost')
+                    has_uri = creds.get('uri') or creds.get('url') or creds.get('amqp_uri')
+                    
+                    if has_uri or (has_host and has_vhost):
+                        return creds
+                elif clean_type in ['redis', 'valkey']:
+                    # Redis/Valkey should have hostname/host OR URI
+                    if (creds.get('hostname') or creds.get('host') or 
+                        creds.get('uri') or creds.get('url') or 
+                        creds.get('redis_uri')):
+                        return creds
     
     return None
 

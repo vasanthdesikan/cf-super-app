@@ -2,6 +2,19 @@
 # Parallel builds can be enabled by pushing apps separately or using CF CLI with --strategy flag
 # Example: cf push --strategy rolling
 
+# Variables used in routes:
+# - SPACE_NAME: Space name (e.g., "dev", "test", "prod")
+# - DOMAIN: Domain name (e.g., "cfapps.example.com")
+# 
+# Provide variables when deploying:
+#   cf push --var SPACE_NAME=your-space-name --var DOMAIN=your-domain.com
+# Or use a vars file:
+#   cf push --vars-file vars.yml
+#
+# Example vars.yml:
+#   SPACE_NAME: dev
+#   DOMAIN: cfapps.example.com
+
 applications:
 # UI Application - Only app with public routes
 - name: service-tester-ui
@@ -21,7 +34,8 @@ applications:
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  host: service-tester-postgres
+  routes:
+  - route: service-tester-postgres-((SPACE_NAME)).((DOMAIN))
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
@@ -34,7 +48,8 @@ applications:
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  host: service-tester-mysql
+  routes:
+  - route: service-tester-mysql-((SPACE_NAME)).((DOMAIN))
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
@@ -47,7 +62,8 @@ applications:
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  host: service-tester-rabbitmq
+  routes:
+  - route: service-tester-rabbitmq-((SPACE_NAME)).((DOMAIN))
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend
@@ -60,7 +76,8 @@ applications:
   instances: 1
   buildpack: python_buildpack
   command: python app.py
-  host: service-tester-valkey
+  routes:
+  - route: service-tester-valkey-((SPACE_NAME)).((DOMAIN))
   env:
     PYTHONUNBUFFERED: 1
     APP_TYPE: backend

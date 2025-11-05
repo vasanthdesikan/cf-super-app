@@ -43,7 +43,7 @@ class RabbitMQHandler(MessageQueueHandler):
         return self.connection, self.channel
     
     def test_transaction(self, data=None):
-        """Test RabbitMQ transaction (publish and consume)"""
+        """Test RabbitMQ transaction (publish message)"""
         if data is None:
             data = {}
         
@@ -56,25 +56,20 @@ class RabbitMQHandler(MessageQueueHandler):
             # Declare queue
             channel.queue_declare(queue=queue_name, durable=False)
             
-            # Publish message
+            # Publish message (don't consume - let it stay in queue for display)
             channel.basic_publish(
                 exchange='',
                 routing_key=queue_name,
                 body=message,
-                properties=pika.BasicProperties(delivery_mode=2)  # Make message persistent
+                properties=pika.BasicProperties(delivery_mode=1)  # Non-persistent
             )
             
-            # Consume message
-            method_frame, header_frame, body = channel.basic_get(queue=queue_name, auto_ack=True)
-            
-            consumed_message = body.decode('utf-8') if body else None
-            
             return {
-                'action': 'publish_and_consume',
+                'action': 'publish',
                 'queue': queue_name,
                 'published': message,
-                'consumed': consumed_message,
-                'status': 'success'
+                'status': 'success',
+                'note': 'Message published to queue. Use list_queues to see it.'
             }
         except Exception as e:
             raise Exception(f"RabbitMQ transaction failed: {str(e)}")
@@ -146,13 +141,12 @@ class RabbitMQHandler(MessageQueueHandler):
                     
                     # Queue exists, add it to the list
                     # Peek at messages in the queue (up to 5 messages)
-                    # Note: We'll consume and republish to peek at contents
+                    # Use basic_get with auto_ack=False, then reject with requeue=True to peek without removing
                     queue_messages = []
                     if message_count > 0:
-                        # Create a separate channel for peeking to avoid affecting the main channel
+                        # Create a separate channel for peeking
                         peek_channel = conn.channel()
                         try:
-                            messages_to_republish = []
                             for _ in range(min(message_count, 5)):
                                 method_frame, header_frame, body = peek_channel.basic_get(
                                     queue=queue_name, 
@@ -162,29 +156,13 @@ class RabbitMQHandler(MessageQueueHandler):
                                     try:
                                         message_content = body.decode('utf-8')
                                         queue_messages.append(message_content)
-                                        # Store for republishing
-                                        messages_to_republish.append({
-                                            'body': body
-                                        })
-                                        # Acknowledge to remove from queue
-                                        peek_channel.basic_ack(method_frame.delivery_tag)
+                                        # Reject and requeue to put message back in queue
+                                        peek_channel.basic_reject(method_frame.delivery_tag, requeue=True)
                                     except Exception:
                                         queue_messages.append(f"<binary data: {len(body)} bytes>")
-                                        messages_to_republish.append({
-                                            'body': body
-                                        })
-                                        peek_channel.basic_ack(method_frame.delivery_tag)
+                                        peek_channel.basic_reject(method_frame.delivery_tag, requeue=True)
                                 else:
                                     break
-                            
-                            # Republish messages back to queue (to restore queue state)
-                            for msg_data in messages_to_republish:
-                                peek_channel.basic_publish(
-                                    exchange='',
-                                    routing_key=queue_name,
-                                    body=msg_data['body'],
-                                    properties=pika.BasicProperties(delivery_mode=1)
-                                )
                             peek_channel.close()
                         except Exception as e:
                             # If peeking fails, just continue without messages

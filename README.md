@@ -294,10 +294,28 @@ services:
   - my-postgres-service
 ```
 
-4. Deploy the application:
+4. Deploy the application with variables:
 ```bash
-cf push
+# Get your space name and domain
+SPACE_NAME=$(cf target | grep space | awk '{print $2}')
+DOMAIN=$(cf domains | grep -v '^name' | head -n 1 | awk '{print $1}')
+
+# Deploy with variables
+cf push --var SPACE_NAME=$SPACE_NAME --var DOMAIN=$DOMAIN
 ```
+
+Alternatively, create a `vars.yml` file:
+```yaml
+SPACE_NAME: your-space-name
+DOMAIN: your-domain.com
+```
+
+Then deploy:
+```bash
+cf push --vars-file vars.yml
+```
+
+The routes will be automatically created in the format `{app-name}-{space-name}.{domain}` as specified in the manifest.
 
 The application will automatically:
 - Read service credentials from `VCAP_SERVICES`

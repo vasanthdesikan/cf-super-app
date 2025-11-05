@@ -20,35 +20,67 @@ BACKEND_APPS = {
     'valkey': 'service-tester-valkey'
 }
 
-# Cache for domain extraction
+# Cache for domain and space info
 _DOMAIN_CACHE = None
+_SPACE_NAME_CACHE = None
 
-def _get_domain():
-    """Get CF domain from VCAP_APPLICATION (cached)"""
-    global _DOMAIN_CACHE
-    if _DOMAIN_CACHE is not None:
-        return _DOMAIN_CACHE
+def _get_domain_and_space():
+    """Extract domain and space name from VCAP_APPLICATION"""
+    global _DOMAIN_CACHE, _SPACE_NAME_CACHE
+    if _DOMAIN_CACHE is not None and _SPACE_NAME_CACHE is not None:
+        return _DOMAIN_CACHE, _SPACE_NAME_CACHE
     
     vcap = os.environ.get('VCAP_APPLICATION', '{}')
     if vcap and vcap != '{}':
         try:
             app_info = json.loads(vcap)
             uris = app_info.get('uris', [])
+            space_name = app_info.get('space_name', '')
+            
             if uris and '.' in uris[0]:
-                _DOMAIN_CACHE = '.'.join(uris[0].split('.')[1:])
-                return _DOMAIN_CACHE
+                # Extract domain from URI
+                # Format: app-name.random-route.domain.com -> domain.com
+                domain = '.'.join(uris[0].split('.')[1:])
+                _DOMAIN_CACHE = domain
+                _SPACE_NAME_CACHE = space_name
+                return domain, space_name
         except (json.JSONDecodeError, KeyError, IndexError):
             pass
+    
     _DOMAIN_CACHE = ''
-    return ''
+    _SPACE_NAME_CACHE = ''
+    return '', ''
 
 def get_backend_url(service_name):
-    """Get backend app URL"""
+    """Generate backend app URL using domain-based approach with space name"""
     backend_app = BACKEND_APPS.get(service_name)
     if not backend_app:
         return None
-    domain = _get_domain()
-    return f'http://{backend_app}.{domain}' if domain else f'http://{backend_app}'
+    
+    # Check for explicit backend URL in environment (set in manifest)
+    env_var = f'BACKEND_{service_name.upper()}_URL'
+    backend_url = os.environ.get(env_var)
+    if backend_url:
+        return backend_url
+    
+    # Get domain and space name from VCAP_APPLICATION
+    domain, space_name = _get_domain_and_space()
+    
+    if domain:
+        # Construct URL: http://{app-name}-{space-name}.{domain}
+        # Note: Routes must be created with this format for this to work
+        # Cloud Foundry will create routes as {app-name}.{domain} by default
+        # To use {app-name}-{space-name}.{domain}, routes must be created post-deployment
+        if space_name:
+            url = f'http://{backend_app}-{space_name}.{domain}'
+        else:
+            # Fallback: use app name with domain (matches default CF route)
+            url = f'http://{backend_app}.{domain}'
+        return url
+    
+    # Last resort: try direct app name (may work within same space)
+    return f'http://{backend_app}'
+
 
 # Lazy load handlers only for backend apps
 if not IS_UI_APP:
@@ -104,7 +136,16 @@ def _handle_backend_request(service_name, action='test', **kwargs):
             result = handler.test_transaction(kwargs.get('data', {}))
         elif action == 'list':
             if service_name in ['mysql', 'postgres']:
-                result = handler.get_table_data(kwargs['table'], **kwargs) if kwargs.get('table') else handler.list_tables()
+                table = kwargs.pop('table', None)
+                if table:
+                    # Extract table-specific kwargs (limit, offset) and remove table
+                    result = handler.get_table_data(
+                        table,
+                        limit=kwargs.pop('limit', 100),
+                        offset=kwargs.pop('offset', 0)
+                    )
+                else:
+                    result = handler.list_tables()
             elif service_name == 'rabbitmq':
                 result = handler.list_queues()
             elif service_name == 'valkey':
@@ -152,18 +193,24 @@ def list_service_resources(service_name):
     if IS_UI_APP:
         return _proxy_request('GET', service_name, 'list/', params=request.args)
     
-    kwargs = {'table': request.args.get('table')}
+    # Build kwargs based on service type
+    kwargs = {}
     if service_name in ['mysql', 'postgres']:
-        if kwargs['table']:
-            kwargs.update({
+        table = request.args.get('table')
+        if table:
+            kwargs = {
+                'table': table,
                 'limit': int(request.args.get('limit', 100)),
                 'offset': int(request.args.get('offset', 0))
-            })
+            }
     elif service_name == 'valkey':
-        kwargs.update({
+        kwargs = {
             'pattern': request.args.get('pattern', '*'),
             'limit': int(request.args.get('limit', 100))
-        })
+        }
+    elif service_name == 'rabbitmq':
+        # RabbitMQ doesn't need any kwargs
+        kwargs = {}
     
     return _handle_backend_request(service_name, 'list', **kwargs)
 

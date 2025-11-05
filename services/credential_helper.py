@@ -47,14 +47,13 @@ def find_service_credentials(service_types, service_name=None):
     """
     Find service credentials from VCAP_SERVICES.
     
-    Simple approach: Each app is bound to ONE service with a matching name.
-    - service-tester-postgres app → service-tester-postgres service
-    - service-tester-mysql app → service-tester-mysql service
-    - service-tester-rabbitmq app → service-tester-rabbitmq service
-    - service-tester-valkey app → service-tester-valkey service
+    Strategy:
+    1. If service_name is provided, try to find exact match
+    2. Try to find service matching app name (e.g., service-tester-postgres app → service-tester-postgres service)
+    3. Fall back to finding ANY service of the matching type (since services are bound to apps)
     
     Args:
-        service_types: List of service type identifiers (used to determine expected service name)
+        service_types: List of service type identifiers
         service_name: Optional exact service instance name to match
     
     Returns:
@@ -70,33 +69,86 @@ def find_service_credentials(service_types, service_name=None):
     except json.JSONDecodeError:
         return None
     
-    # Map service types to expected service instance names
-    service_name_map = {
-        'postgres': 'service-tester-postgres',
-        'postgresql': 'service-tester-postgres',
-        'mysql': 'service-tester-mysql',
-        'rabbitmq': 'service-tester-rabbitmq',
-        'redis': 'service-tester-valkey',
-        'valkey': 'service-tester-valkey'
-    }
+    # Strategy 1: If exact service name provided, use it
+    if service_name:
+        for service_type, services in vcap.items():
+            for service in services:
+                if service.get('name') == service_name:
+                    creds = service.get('credentials', {})
+                    if creds:
+                        creds = _unwrap_nested_credentials(creds)
+                        if creds:
+                            return creds
     
-    # Determine expected service name
-    expected_service_name = service_name
-    if not expected_service_name:
-        # Find the expected service name from service types
-        for st in service_types:
-            clean_type = st.replace('p.', '').replace('p-', '').replace('.', '-').lower()
-            if clean_type in service_name_map:
-                expected_service_name = service_name_map[clean_type]
-                break
+    # Strategy 2: Try to match by app name pattern
+    # Get current app name from VCAP_APPLICATION
+    vcap_app = os.environ.get('VCAP_APPLICATION', '{}')
+    app_name = None
+    if vcap_app and vcap_app != '{}':
+        try:
+            app_info = json.loads(vcap_app)
+            app_name = app_info.get('name') or app_info.get('application_name')
+        except json.JSONDecodeError:
+            pass
     
-    if not expected_service_name:
-        return None
+    # Map app names to expected service names
+    if app_name:
+        service_name_map = {
+            'service-tester-postgres': 'service-tester-postgres',
+            'service-tester-mysql': 'service-tester-mysql',
+            'service-tester-rabbitmq': 'service-tester-rabbitmq',
+            'service-tester-valkey': 'service-tester-valkey'
+        }
+        expected_service_name = service_name_map.get(app_name)
+        if expected_service_name:
+            for service_type, services in vcap.items():
+                for service in services:
+                    if service.get('name') == expected_service_name:
+                        creds = service.get('credentials', {})
+                        if creds:
+                            creds = _unwrap_nested_credentials(creds)
+                            if creds:
+                                return creds
     
-    # Search all services in VCAP_SERVICES for the expected service name
+    # Strategy 3: Find ANY service matching the service types
+    # This handles cases where service names don't match app names
+    # Normalize service types for matching
+    normalized_types = []
+    for st in service_types:
+        # Remove prefixes like 'p.' or 'p-'
+        clean = st.replace('p.', '').replace('p-', '').replace('.', '-').lower()
+        normalized_types.append(clean)
+        # Also try original type
+        normalized_types.append(st.lower())
+    
+    # Check if service type matches (by key in VCAP_SERVICES or by tags/label)
     for service_type, services in vcap.items():
+        # Check if service type key matches
+        service_type_lower = service_type.lower()
+        matches_type = any(
+            nt in service_type_lower or service_type_lower in nt
+            for nt in normalized_types
+        )
+        
+        if matches_type:
+            # Use first matching service
+            for service in services:
+                creds = service.get('credentials', {})
+                if creds:
+                    creds = _unwrap_nested_credentials(creds)
+                    if creds:
+                        return creds
+        
+        # Also check by label/tags in service metadata
         for service in services:
-            if service.get('name') == expected_service_name:
+            label = service.get('label', '').lower()
+            tags = service.get('tags', [])
+            if isinstance(tags, str):
+                tags = [tags]
+            tags_lower = [str(t).lower() for t in tags]
+            
+            # Check if any normalized type matches label or tags
+            if any(nt in label or any(nt in tag for tag in tags_lower) for nt in normalized_types):
                 creds = service.get('credentials', {})
                 if creds:
                     creds = _unwrap_nested_credentials(creds)
